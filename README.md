@@ -29,4 +29,4 @@ For an interactive terminal, run
 docker run -it --rm bonk bash
 ```
 
-Note that the `--rm` flag will delete the container after the command finishes! You should use mounted volumes in the container to persist data across commands.
+Note that the `--rm` flag will delete the container after the command finishes! You should use [bind mounts](https://docs.docker.com/engine/storage/bind-mounts/) to persist data across commands if not using a devcontainer (devcontainers will do their own thing to persist data).
