@@ -15,6 +15,7 @@ RUN /bin/bash <<EOF
         autoconf \
         build-essential \
         ca-certificates \
+        git \
         gnupg \
         gpg \
         libeigen3-dev \
