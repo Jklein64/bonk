@@ -38,6 +38,8 @@ RUN /bin/bash <<EOF
     wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 18
 EOF
 
+RUN apt-get -y --no-install-recommends install npm nodejs
+
 COPY . /root
 WORKDIR /root
 
