@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 4.1.1)
+
+# Configure Clang
+set(CMAKE_C_COMPILER "clang-18")
+set(CMAKE_CXX_COMPILER "clang++-18")
+
 project(bonk)
 
 file(GLOB_RECURSE sources src/*.cpp src/*.h)

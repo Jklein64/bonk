@@ -15,10 +15,13 @@ RUN /bin/bash <<EOF
         autoconf \
         build-essential \
         ca-certificates \
+        gnupg \
         gpg \
         libeigen3-dev \
         libtool \
         libssl-dev \
+        lsb-release \
+        software-properties-common \
         unzip \
         wget
     # Install CMake. See https://askubuntu.com/a/865294
@@ -30,6 +33,8 @@ RUN /bin/bash <<EOF
     apt-get install -y --no-install-recommends kitware-archive-keyring
     apt-get update
     apt-get install -y --no-install-recommends cmake
+    # Install Clang (mainly for clangd). See https://askubuntu.com/a/1508280
+    wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 18
 EOF
 
 COPY . /root
