@@ -1,4 +1,5 @@
 {
+    "cmake.enableAutomaticKitScan": false,
     "cmake.generator": "Unix Makefiles",
     "clangd.path": "clangd-18"
 }
