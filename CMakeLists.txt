@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 4.1.1)
 
+# Set to Release for optimizations
+set(CMAKE_BUILD_TYPE Debug)
+
 # Configure Clang
 set(CMAKE_C_COMPILER "clang-18")
 set(CMAKE_CXX_COMPILER "clang++-18")

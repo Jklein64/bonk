@@ -21,7 +21,7 @@
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
-			"extensions": ["ms-vscode.cmake-tools", "llvm-vs-code-extensions.vscode-clangd"]
+			"extensions": ["ms-vscode.cmake-tools", "llvm-vs-code-extensions.vscode-clangd", "vadimcn.vscode-lldb"]
 		}
 	}
 
