@@ -8,3 +8,7 @@ t = t[:len(out)]
 peaks, _ = sp.signal.find_peaks(out, height=0)
 freq_est = np.mean(1 / (t[peaks[1:]] - t[peaks[:-1]]))
 print(freq_est)
+
+import matplotlib.pyplot as plt
+plt.plot(t, out)
+plt.show()

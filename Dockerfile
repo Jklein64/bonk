@@ -19,6 +19,7 @@ RUN /bin/bash <<EOF
         gnupg \
         gpg \
         libeigen3-dev \
+        libfmt-dev \
         libtool \
         libssl-dev \
         lsb-release \
@@ -36,7 +37,10 @@ RUN /bin/bash <<EOF
     apt-get install -y --no-install-recommends cmake
     # Install Clang (mainly for clangd). See https://askubuntu.com/a/1508280
     wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 18
+    # Install iir for filtering
+    add-apt-repository ppa:berndporr/dsp && apt install iir1 iir1-dev
 EOF
+
 
 # Create a non-root user
 RUN useradd -ms /bin/bash bonk-dev

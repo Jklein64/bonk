@@ -17,23 +17,25 @@ int main() {
         .viz_block_size = 5,
         .mass = 0.02,
         .stiffness = 1000,
+        .area = 1,
     };
     SimState initial_state = {
         .x = 2,
         .v = 0,
     };
-    sim.configure(params, initial_state);
-
     std::vector<double> all_blocks;
-    // run simulation for ~15 seconds
-    int num_blocks = 15 * params.physics_sample_rate / params.physics_block_size;
-    all_blocks.reserve(num_blocks * params.physics_block_size);
-    for (int k = 0; k < num_blocks; k++) {
-        sim.integrate();
-        std::vector<double> block = sim.get_physics_block();
-        for (auto& sample : block) {
+    sim.configure(params, initial_state);
+    sim.set_physics_callback([&](auto& physics_block) {
+        for (auto& sample : physics_block) {
             all_blocks.push_back(sample);
         }
+    });
+    double t = 0;
+    double dt = 1. / params.physics_sample_rate;
+    // run simulation for ~15 seconds
+    while (t < 15) {
+        sim.step(dt);
+        t += dt;
     }
 
     // Save to numpy file

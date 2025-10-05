@@ -1,11 +1,16 @@
 #pragma once
 
+#include "Iir.h"
+#include <functional>
+#include <iir/Butterworth.h>
 #include <vector>
 
 struct SimState {
     double x;
     double v;
+
     std::vector<double> physics_block;
+    std::vector<double> audio_block;
 };
 
 struct SimParams {
@@ -18,16 +23,23 @@ struct SimParams {
 
     double mass;      // mass of object on spring
     double stiffness; // spring constant
+    double area;      // surface area of object
 };
 
 class Sim {
   public:
     void configure(const SimParams& params, const SimState& initial_state);
-    void integrate();
-
-    const std::vector<double>& get_physics_block();
+    void set_physics_callback(std::function<void(const std::vector<double>&)> physics_callback);
+    void set_audio_callback(std::function<void(const std::vector<double>&)> audio_callback);
+    void step(double dt);
 
   private:
     SimParams params;
     SimState state;
+    Iir::Butterworth::LowPass<8> audio_aa_filter;
+    std::function<void(const std::vector<double>&)> physics_callback;
+    std::function<void(const std::vector<double>&)> audio_callback;
+
+    int audio_decimation_factor;
+    int audio_decimation_index;
 };

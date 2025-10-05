@@ -1,27 +1,51 @@
 #include "sim.h"
-#include <cstdio>
 
 void Sim::configure(const SimParams& params, const SimState& initial_state) {
     this->params = params;
     this->state = initial_state;
-    this->state.physics_block.resize(this->params.physics_block_size);
+    this->state.physics_block.reserve(this->params.physics_block_size);
+    this->state.audio_block.reserve(this->params.audio_block_size);
+    this->audio_decimation_index = 0;
+    // The floor from integer division means this will never go below the audio sample rate
+    this->audio_decimation_factor = params.physics_sample_rate / params.audio_sample_rate;
+    this->audio_aa_filter.setup(params.physics_sample_rate, params.audio_sample_rate);
+    // Uninitialized std::function values are NOT just no-ops, and throw std::bad_function_call
+    this->physics_callback = [](auto&) {};
+    this->audio_callback = [](auto&) {};
 }
 
-void Sim::integrate() {
+void Sim::set_physics_callback(std::function<void(const std::vector<double>&)> physics_callback) {
+    this->physics_callback = physics_callback;
+}
+
+void Sim::set_audio_callback(std::function<void(const std::vector<double>&)> audio_callback) {
+    this->audio_callback = audio_callback;
+}
+
+void Sim::step(double dt) {
     SimParams& params = this->params;
     SimState& state = this->state;
 
-    double dt = 1. / params.physics_sample_rate;
-    for (int k = 0; k < params.physics_block_size; k++) {
-        // F = ma = -kx => a = -kx/m
-        double a = -params.stiffness * state.x / params.mass;
-        state.v += a * dt;
-        state.x += state.v * dt;
+    // F = ma = -kx => a = -kx/m
+    double a = -params.stiffness * state.x / params.mass;
+    state.v += a * dt;
+    state.x += state.v * dt;
 
-        state.physics_block[k] = state.x;
+    state.physics_block.push_back(state.x);
+    if (state.physics_block.size() == params.physics_block_size) {
+        this->physics_callback(state.physics_block);
+        state.physics_block.clear();
     }
-}
 
-const std::vector<double>& Sim::get_physics_block() {
-    return this->state.physics_block;
+    // Anti-alias and decimate the physics sim to audio rate
+    double x_audio_aa = audio_aa_filter.filter(state.x);
+    if (this->audio_decimation_index % this->audio_decimation_factor == 0) {
+        state.audio_block.push_back(x_audio_aa);
+        if (state.audio_block.size() == params.audio_block_size) {
+            this->audio_callback(state.audio_block);
+            this->audio_decimation_index = 0;
+            state.audio_block.clear();
+        }
+    }
+    this->audio_decimation_index++;
 }

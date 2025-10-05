@@ -16,10 +16,12 @@ add_executable(${PROJECT_NAME} ${sources})
 target_compile_options(${PROJECT_NAME} PUBLIC -std=c++2a -Wall -Werror)
 
 find_package(Eigen3 REQUIRED)
+find_package(fmt REQUIRED)
+find_package(iir REQUIRED)
 
 # Non-system deps
 include(FetchContent)
 FetchContent_Declare(libnpy GIT_REPOSITORY https://github.com/matajoh/libnpy GIT_TAG v1.5.3)
 FetchContent_MakeAvailable(libnpy)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC ${Eigen_LIBRARIES} npy::npy)
+target_link_libraries(${PROJECT_NAME} PUBLIC ${Eigen_LIBRARIES} fmt::fmt npy::npy iir::iir)
