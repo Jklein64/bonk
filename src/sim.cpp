@@ -1,6 +1,5 @@
 #include "sim.h"
 #include <cstdio>
-#include <iostream>
 
 void Sim::configure(const SimParams& params, const SimState& initial_state) {
     this->params = params;
@@ -21,7 +20,6 @@ void Sim::integrate() {
 
         state.physics_block[k] = state.x;
     }
-    std::cout << std::endl;
 }
 
 const std::vector<double>& Sim::get_physics_block() {
