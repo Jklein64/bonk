@@ -23,13 +23,12 @@ void Sim::set_audio_callback(std::function<void(const std::vector<double>&)> aud
 }
 
 void Sim::step(double dt) {
-    SimParams& params = this->params;
-    SimState& state = this->state;
-
-    // F = ma = -kx => a = -kx/m
-    double a = -params.stiffness * state.x / params.mass;
-    state.v += a * dt;
-    state.x += state.v * dt;
+    double c = params.damping;
+    double k = params.stiffness;
+    double m = params.mass;
+    // Integrate mẍ + cẋ + kx = 0 with Semi-Implicit Euler
+    state.v = state.v - c / m * state.v * dt - k / m * state.x * dt;
+    state.x = state.x + state.v * dt;
 
     state.physics_block.push_back(state.x);
     if (state.physics_block.size() == params.physics_block_size) {

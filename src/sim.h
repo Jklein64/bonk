@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Iir.h"
 #include <functional>
 #include <iir/Butterworth.h>
 #include <vector>
@@ -23,6 +22,7 @@ struct SimParams {
 
     double mass;      // mass of object on spring
     double stiffness; // spring constant
+    double damping;   // spring damping
     double area;      // surface area of object
 };
 
