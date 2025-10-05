@@ -18,7 +18,6 @@ RUN /bin/bash <<EOF
         git \
         gnupg \
         gpg \
-        libeigen3-dev \
         libfmt-dev \
         libtool \
         libssl-dev \
@@ -37,33 +36,50 @@ RUN /bin/bash <<EOF
     apt-get install -y --no-install-recommends cmake
     # Install Clang (mainly for clangd). See https://askubuntu.com/a/1508280
     wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 18
-    # Install iir for filtering
-    add-apt-repository ppa:berndporr/dsp && apt install iir1 iir1-dev
 EOF
 
 
+# Expose port 3000 for NGINX
+EXPOSE 3000
+
+# Another install for actual dependencies
+RUN /bin/bash <<EOF
+    add-apt-repository ppa:berndporr/dsp
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        iir1 \
+        iir1-dev \
+        libeigen3-dev \
+        nginx
+EOF
+
 # Create a non-root user
 RUN useradd -ms /bin/bash bonk-dev
-USER bonk-dev
+# Symlink nginx config and assign permissions
+COPY ./nginx.conf /etc/nginx/nginx.conf
+RUN chown -R bonk-dev:bonk-dev /var/lib/nginx /var/log/nginx \
+    && chmod -R 755 /var/lib/nginx /var/log/nginx \
+    # See https://stackoverflow.com/a/64426330
+    && touch /run/nginx.pid \
+    && chown -R bonk-dev:bonk-dev /run/nginx.pid
 
+# nvm install must be user-local
+USER bonk-dev
 # Use bash for the shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Create a script file sourced by both interactive and non-interactive bash shells
 ENV BASH_ENV="/home/bonk-dev/.bash_env"
 RUN touch "${BASH_ENV}"
-RUN echo '. "${BASH_ENV}"' >> ~/.bashrc
+RUN echo 'source "${BASH_ENV}"' >> ~/.bashrc
 # Download and install nvm
 RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | PROFILE="${BASH_ENV}" bash
 RUN nvm install 22.19.0
 
-# Expose port 3000 for vite dev server
-EXPOSE 3000
-
 # Use heredoc to make multi-line CMD
 RUN tee /tmp/cmd.sh <<EOF
-    cmake -B build
-    cmake --build build
-    ./build/bonk
+cmake -B build
+cmake --build build
+./build/bonk
 EOF
 
 CMD ["/bin/bash", "/tmp/cmd.sh"]

@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    // Must match Dockerfile EXPOSE and devcontainer.json
-    port: 3000
+    // Must match NGINX config
+    port: 3002
   }
 })
