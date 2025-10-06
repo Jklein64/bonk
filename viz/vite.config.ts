@@ -7,6 +7,11 @@ export default defineConfig({
   server: {
     host: true,
     // Must match NGINX config
-    port: 3002
+    port: 3002,
+    // See https://vite.dev/config/server-options.html#server-hmr
+    strictPort: true,
+    hmr: {
+      clientPort: 3002
+    }
   }
 })
