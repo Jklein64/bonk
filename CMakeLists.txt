@@ -24,6 +24,7 @@ include(FetchContent)
 set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO NO) # Fails to link if this is YES, which is the default
 FetchContent_Declare(libnpy GIT_REPOSITORY https://github.com/matajoh/libnpy.git GIT_TAG v1.5.3)
 FetchContent_Declare(httplib GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git GIT_TAG v0.26.0)
-FetchContent_MakeAvailable(libnpy httplib)
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+FetchContent_MakeAvailable(libnpy httplib json)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC ${Eigen_LIBRARIES} fmt::fmt npy::npy iir::iir httplib::httplib)
+target_link_libraries(${PROJECT_NAME} PUBLIC ${Eigen_LIBRARIES} fmt::fmt npy::npy iir::iir httplib::httplib nlohmann_json::nlohmann_json)
