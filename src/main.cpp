@@ -79,6 +79,7 @@ int main() {
             return;
         }
 
+        // Capturing params and initial_state by reference might use-after-free
         std::thread([&ed, params, initial_state]() {
             Sim sim;
             bool should_step = true;

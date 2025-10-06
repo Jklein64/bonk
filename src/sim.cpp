@@ -5,7 +5,7 @@ void Sim::configure(const SimParams& params, const SimState& initial_state) {
     this->state = initial_state;
     this->state.physics_block.reserve(this->params.physics_block_size);
     this->state.audio_block.reserve(this->params.audio_block_size);
-    this->audio_decimation_index = 0;
+    this->samples_until_audio_sample = 0;
     // The floor from integer division means this will never go below the audio sample rate
     this->audio_decimation_factor = params.physics_sample_rate / params.audio_sample_rate;
     this->audio_aa_filter.setup(params.physics_sample_rate, params.audio_sample_rate);
@@ -38,13 +38,15 @@ void Sim::step(double dt) {
 
     // Anti-alias and decimate the physics sim to audio rate
     double x_audio_aa = audio_aa_filter.filter(state.x);
-    if (this->audio_decimation_index % this->audio_decimation_factor == 0) {
+    if (this->samples_until_audio_sample == 0) {
         state.audio_block.push_back(x_audio_aa);
         if (state.audio_block.size() == params.audio_block_size) {
             this->audio_callback(state.audio_block);
-            this->audio_decimation_index = 0;
+            this->samples_until_audio_sample = this->audio_decimation_factor;
             state.audio_block.clear();
         }
     }
-    this->audio_decimation_index++;
+
+    // Always decrementing is the correct behavior
+    samples_until_audio_sample--;
 }
