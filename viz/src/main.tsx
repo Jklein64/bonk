@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { useRef, useState, StrictMode, useMemo } from "react";
+import { useRef, useState, StrictMode, useMemo, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas, type ThreeElements } from "@react-three/fiber";
 import "./index.css";
@@ -95,15 +95,36 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
   );
 }
 
+function App({ children }: { children: any }) {
+  const audioContext = useRef(new AudioContext());
+  useEffect(() => {
+    audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
+      const bonkWorkletNode = new AudioWorkletNode(audioContext.current, "bonk-processor");
+      bonkWorkletNode.connect(audioContext.current.destination);
+    });
+
+    // See https://developer.chrome.com/blog/autoplay/#web_audio
+    window.addEventListener("click", () => {
+      if (audioContext.current.state === "suspended") {
+        audioContext.current.resume();
+      }
+    });
+  }, []);
+
+  return <>{children}</>;
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Canvas>
-      <ambientLight intensity={Math.PI / 2} />
-      <spotLight position={[10, 20, 20]} angle={0.15} penumbra={1} decay={0.125} intensity={Math.PI} />
-      <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
-      <Wall position={[-1, 0, 0]} />
-      <TrianglePrism position={[1, 0, 0]} />
-    </Canvas>
+    <App>
+      <Canvas>
+        <ambientLight intensity={Math.PI / 2} />
+        <spotLight position={[10, 20, 20]} angle={0.15} penumbra={1} decay={0.125} intensity={Math.PI} />
+        <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
+        <Wall position={[-1, 0, 0]} />
+        <TrianglePrism position={[1, 0, 0]} />
+      </Canvas>
+    </App>
   </StrictMode>
 );
 
