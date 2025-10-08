@@ -155,7 +155,7 @@ function configureSim(displacement: number) {
     physicsSampleRate: 1000000,
     physicsBlockSize: 512,
     audioSampleRate: 48000,
-    audioBlockSizessss: 128,
+    audioBlockSize: 128,
     vizSampleRate: 30,
     vizBlockSize: 5,
     // These sound okay...
