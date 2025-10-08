@@ -44,9 +44,6 @@ int main() {
 
     EventDispatcher ed;
     httplib::Server server;
-    server.Get("/api/hi", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content("Hello World!", "text/plain");
-    });
 
     server.Get("/api/stream/audio", [&](const httplib::Request&, httplib::Response& res) {
         res.set_header("Cache-Control", "no-cache");
