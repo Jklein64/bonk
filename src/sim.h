@@ -41,5 +41,5 @@ class Sim {
     std::function<void(const std::vector<double>&)> audio_callback;
 
     int audio_decimation_factor;
-    int samples_until_audio_sample;
+    int steps_until_audio_sample;
 };

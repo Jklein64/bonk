@@ -2,9 +2,11 @@
 #include <fmt/core.h>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
+#include "nlohmann/json_fwd.hpp"
 #include "sim.h"
 
 class EventDispatcher {
@@ -36,6 +38,10 @@ class EventDispatcher {
 };
 
 int main() {
+#ifdef ENABLE_DEBUG_LOGS
+    spdlog::set_level(spdlog::level::debug);
+#endif
+
     EventDispatcher ed;
     httplib::Server server;
     server.Get("/api/hi", [](const httplib::Request&, httplib::Response& res) {
@@ -73,7 +79,7 @@ int main() {
                 .x = json_body["initialState"]["x"],
                 .v = json_body["initialState"]["v"],
             };
-        } catch (std::exception e) {
+        } catch (nlohmann::json::exception e) {
             res.status = 400;
             res.body = e.what();
             return;
@@ -109,6 +115,21 @@ int main() {
         res.set_content("Nice!", "text/plain");
     });
 
+    server.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+        if (res.status >= 400) {
+            // assumes that body always contains error reason
+            spdlog::error(res.body);
+        }
+
+        spdlog::info("{} {} -> {}", req.method, req.path, res.status);
+    });
+
+    server.set_error_logger([](const httplib::Error& err, const httplib::Request* req) {
+        spdlog::error("{} while processing request", httplib::to_string(err));
+        spdlog::error("{} {} -> :(", req->method, req->path);
+    });
+
+    spdlog::info("listening at http://0.0.0.0:3001");
     server.listen("0.0.0.0", 3001);
 }
 

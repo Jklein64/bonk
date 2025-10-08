@@ -8,6 +8,7 @@ set(CMAKE_C_COMPILER "clang-18")
 set(CMAKE_CXX_COMPILER "clang++-18")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+
 project(bonk)
 
 file(GLOB_RECURSE sources src/*.cpp src/*.h)
@@ -15,9 +16,16 @@ file(GLOB_RECURSE sources src/*.cpp src/*.h)
 add_executable(${PROJECT_NAME} ${sources})
 target_compile_options(${PROJECT_NAME} PUBLIC -std=c++2a -Wall -Werror)
 
+# Log debug logs?
+option(ENABLE_DEBUG_LOGS OFF)
+if (ENABLE_DEBUG_LOGS)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_DEBUG_LOGS)
+endif()
+
 find_package(Eigen3 REQUIRED)
 find_package(fmt REQUIRED)
 find_package(iir REQUIRED)
+find_package(spdlog REQUIRED)
 
 # Non-system deps
 include(FetchContent)
@@ -27,4 +35,12 @@ FetchContent_Declare(httplib GIT_REPOSITORY https://github.com/yhirose/cpp-httpl
 FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
 FetchContent_MakeAvailable(libnpy httplib json)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC ${Eigen_LIBRARIES} fmt::fmt npy::npy iir::iir httplib::httplib nlohmann_json::nlohmann_json)
+target_link_libraries(${PROJECT_NAME} PUBLIC
+    ${Eigen_LIBRARIES} 
+    fmt::fmt 
+    npy::npy 
+    iir::iir 
+    httplib::httplib 
+    nlohmann_json::nlohmann_json
+    spdlog::spdlog
+)

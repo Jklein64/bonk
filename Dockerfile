@@ -50,7 +50,8 @@ RUN /bin/bash <<EOF
         iir1 \
         iir1-dev \
         libeigen3-dev \
-        nginx
+        nginx \
+        libspdlog-dev
 EOF
 
 # Create a non-root user

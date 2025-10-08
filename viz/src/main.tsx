@@ -3,6 +3,7 @@ import { useRef, useState, StrictMode, useMemo, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas, type ThreeElements } from "@react-three/fiber";
 import "./index.css";
+import { useStream, type DataCallback } from "./hooks/useStream";
 
 function Wall(props: ThreeElements["mesh"]) {
   return (
@@ -97,6 +98,8 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
 
 function App({ children }: { children: any }) {
   const audioContext = useRef(new AudioContext());
+  // const { subscribe, unsubscribe } = useStream("audio");
+
   useEffect(() => {
     audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
       const bonkWorkletNode = new AudioWorkletNode(audioContext.current, "bonk-processor");
@@ -104,12 +107,25 @@ function App({ children }: { children: any }) {
     });
 
     // See https://developer.chrome.com/blog/autoplay/#web_audio
-    window.addEventListener("click", () => {
-      if (audioContext.current.state === "suspended") {
-        audioContext.current.resume();
-      }
-    });
+    // window.addEventListener("click", () => {
+    //   if (audioContext.current.state === "suspended") {
+    //     audioContext.current.resume();
+    //   }
+    // });
   }, []);
+
+  // useEffect(() => {
+  //   const callback: DataCallback = (data) => {
+  //     console.log("received data from the audio stream!");
+  //     console.log(data);
+  //   };
+
+  //   subscribe(callback);
+
+  //   return () => {
+  //     unsubscribe(callback);
+  //   };
+  // });
 
   return <>{children}</>;
 }
@@ -139,7 +155,7 @@ function configureSim(displacement: number) {
     physicsSampleRate: 1000000,
     physicsBlockSize: 512,
     audioSampleRate: 48000,
-    audioBlockSize: 128,
+    audioBlockSizessss: 128,
     vizSampleRate: 30,
     vizBlockSize: 5,
     // These sound okay...
