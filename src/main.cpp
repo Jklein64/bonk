@@ -1,12 +1,16 @@
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <fmt/core.h>
 #include <httplib.h>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <unistd.h>
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
-#include "nlohmann/json_fwd.hpp"
 #include "sim.h"
 
 class EventDispatcher {
@@ -19,6 +23,7 @@ class EventDispatcher {
         cv_.wait(lk, [&] {
             return cid_ == id;
         });
+        spdlog::debug("writing {} bytes to sink", message_.size());
         sink.write(message_.data(), message_.size());
     }
 
@@ -37,6 +42,32 @@ class EventDispatcher {
     std::string message_;
 };
 
+class StreamManager {
+  public:
+    // Called repeatedly until completed with sink.done() and return false
+    bool chunked_content_provider(size_t, httplib::DataSink& sink) {
+        std::unique_lock<std::mutex> lk(cv_m);
+
+        if (this->messages_remaining > 0) {
+            this->messages_remaining--;
+            std::string message = fmt::format("data: {}\n\n", "test");
+            sink.write(message.data(), message.size());
+            return true;
+        } else {
+            // Stop client from thinking the connection is dead by sending an SSE "comment"
+            cv.wait_for(lk, std::chrono::milliseconds(this->ping_rate_ms));
+            sink.write(":\n\n", 3);
+            return true;
+        }
+    }
+
+  private:
+    const int ping_rate_ms{5000};
+    int messages_remaining{5};
+    std::condition_variable cv;
+    std::mutex cv_m;
+};
+
 int main() {
 #ifdef ENABLE_DEBUG_LOGS
     spdlog::set_level(spdlog::level::debug);
@@ -45,13 +76,15 @@ int main() {
     EventDispatcher ed;
     httplib::Server server;
 
+    StreamManager audio_stream_manager;
     server.Get("/api/stream/audio", [&](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider("text/event-stream", [&](size_t, httplib::DataSink& sink) {
-            ed.wait_event(sink);
-            return true;
-        });
+
+        using namespace std::placeholders;
+        res.set_chunked_content_provider("text/event-stream",
+                                         std::bind(&StreamManager::chunked_content_provider, &audio_stream_manager, _1, _2));
     });
 
     server.Post("/api/configure", [&](const httplib::Request& req, httplib::Response& res) {
@@ -97,6 +130,7 @@ int main() {
                     avg_power += sample * sample;
                 }
 
+                spdlog::debug("average power is {}", avg_power);
                 // Stop when a block is silent (< -60 dB power)
                 if (avg_power < 1e-6) {
                     should_step = false;
@@ -107,6 +141,7 @@ int main() {
             while (should_step) {
                 sim.step(dt);
             }
+            spdlog::debug("finished stepping sim");
         }).detach();
 
         res.set_content("Nice!", "text/plain");
@@ -124,6 +159,10 @@ int main() {
     server.set_error_logger([](const httplib::Error& err, const httplib::Request* req) {
         spdlog::error("{} while processing request", httplib::to_string(err));
         spdlog::error("{} {} -> :(", req->method, req->path);
+    });
+
+    server.set_post_routing_handler([](const auto& req, auto& res) {
+        spdlog::info("inside post routing handler");
     });
 
     spdlog::info("listening at http://0.0.0.0:3001");
