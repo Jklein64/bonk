@@ -1,13 +1,12 @@
 #include <chrono>
 #include <condition_variable>
-#include <cstring>
 #include <fmt/core.h>
 #include <httplib.h>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <queue>
 #include <spdlog/spdlog.h>
 #include <string>
-#include <unistd.h>
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
@@ -46,26 +45,40 @@ class StreamManager {
   public:
     // Called repeatedly until completed with sink.done() and return false
     bool chunked_content_provider(size_t, httplib::DataSink& sink) {
-        std::unique_lock<std::mutex> lk(cv_m);
-
-        if (this->messages_remaining > 0) {
-            this->messages_remaining--;
-            std::string message = fmt::format("data: {}\n\n", "test");
-            sink.write(message.data(), message.size());
-            return true;
-        } else {
-            // Stop client from thinking the connection is dead by sending an SSE "comment"
-            cv.wait_for(lk, std::chrono::milliseconds(this->ping_rate_ms));
-            sink.write(":\n\n", 3);
-            return true;
+        std::unique_lock<std::mutex> lk(mutex);
+        while (this->message_queue.empty()) {
+            // Wait until there's a queue element, catch spurious wakeups, and
+            // also send an SSE "comment" after ping_delay ms to prevent the
+            // client from thinking the connection is closed
+            if (cv.wait_for(lk, this->ping_delay) == std::cv_status::timeout) {
+                std::string message = ":\n\n";
+                sink.write(message.data(), message.size());
+            }
         }
+
+        while (!this->message_queue.empty()) {
+            const std::string& message = this->message_queue.front();
+            sink.write(message.data(), message.size());
+            this->message_queue.pop();
+        }
+
+        // There is always a next chunk
+        return true;
+    }
+
+    void send_block(const std::vector<double>& buffer) {
+        // TODO do base64 encoding here instead
+        nlohmann::json buffer_json(buffer);
+        std::unique_lock<std::mutex> lk(mutex);
+        message_queue.emplace(fmt::format("data: {}\n\n", buffer_json.dump()));
+        cv.notify_all();
     }
 
   private:
-    const int ping_rate_ms{5000};
-    int messages_remaining{5};
+    std::queue<std::string> message_queue;
+    const std::chrono::milliseconds ping_delay{5000};
     std::condition_variable cv;
-    std::mutex cv_m;
+    std::mutex mutex;
 };
 
 int main() {
@@ -73,7 +86,6 @@ int main() {
     spdlog::set_level(spdlog::level::debug);
 #endif
 
-    EventDispatcher ed;
     httplib::Server server;
 
     StreamManager audio_stream_manager;
@@ -116,21 +128,20 @@ int main() {
         }
 
         // Capturing params and initial_state by reference might use-after-free
-        std::thread([&ed, params, initial_state]() {
+        std::thread([&audio_stream_manager, params, initial_state]() {
             Sim sim;
             bool should_step = true;
             sim.configure(params, initial_state);
             sim.set_audio_callback([&](auto& audio_block) {
                 // TODO json is lossy when storing floats as strings!
-                nlohmann::json json_block(audio_block);
-                ed.send_event(fmt::format("data: {}\n\n", json_block.dump()));
+                audio_stream_manager.send_block(audio_block);
 
                 double avg_power = 0;
                 for (auto& sample : audio_block) {
                     avg_power += sample * sample;
                 }
 
-                spdlog::debug("average power is {}", avg_power);
+                // spdlog::debug("average power is {}", avg_power);
                 // Stop when a block is silent (< -60 dB power)
                 if (avg_power < 1e-6) {
                     should_step = false;
