@@ -3,11 +3,13 @@
 #include <condition_variable>
 #include <fmt/core.h>
 #include <httplib.h>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <queue>
 #include <spdlog/spdlog.h>
 #include <string>
+#include <unordered_map>
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
@@ -25,7 +27,7 @@ class StreamManager {
     }
 
     // Called repeatedly until completed with sink.done() and return false
-    const httplib::ContentProviderWithoutLength chunked_content_provider = [&](size_t, httplib::DataSink& sink) -> bool {
+    bool chunked_content_provider(size_t, httplib::DataSink& sink) {
         std::unique_lock<std::mutex> lk(mutex);
         while (this->message_queue.empty()) {
             // Wait until there's a queue element, catch spurious wakeups, and
@@ -58,6 +60,7 @@ class StreamManager {
     };
 
   private:
+    // SPSC queue, so cannot handle providing to >1 thread
     std::queue<std::string> message_queue;
     const std::chrono::milliseconds ping_delay{5000};
     std::condition_variable cv;
@@ -70,18 +73,25 @@ int main() {
 #endif
 
     httplib::Server server;
+    std::unordered_map<std::string, std::weak_ptr<StreamManager>> audio_stream_managers;
 
-    StreamManager audio_stream_manager;
-    server.Get("/api/stream/audio", [&](const httplib::Request&, httplib::Response& res) {
+    server.Get("/api/stream/audio/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        std::string client_id = req.path_params.at("id");
+        auto audio_stream_manager = std::make_shared<StreamManager>();
+        audio_stream_managers.insert_or_assign(client_id, audio_stream_manager);
+
         res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider("text/event-stream", audio_stream_manager.chunked_content_provider, [](bool) {
-            // TODO remove the stream manager for this client
+        res.set_chunked_content_provider("text/event-stream", [=](size_t offset, httplib::DataSink& sink) {
+            // Lambda is necessary so that the callback copies the shared_ptr
+            return audio_stream_manager->chunked_content_provider(offset, sink);
         });
+
+        spdlog::debug("connected client id {} to audio stream", client_id);
     });
 
-    server.Post("/api/configure", [&](const httplib::Request& req, httplib::Response& res) {
+    server.Post("/api/configure/:id", [&](const httplib::Request& req, httplib::Response& res) {
         SimParams params;
         SimState initial_state;
 
@@ -109,14 +119,17 @@ int main() {
             return;
         }
 
-        // Capturing params and initial_state by reference might use-after-free
-        std::thread([&audio_stream_manager, params, initial_state]() {
+        std::string client_id = req.path_params.at("id");
+        auto audio_stream_manager = std::make_shared<StreamManager>();
+        audio_stream_managers.insert_or_assign(client_id, audio_stream_manager);
+
+        // Capturing by reference will use-after-free
+        std::thread([=]() {
             Sim sim;
             bool should_step = true;
             sim.configure(params, initial_state);
             sim.set_audio_callback([&](auto& audio_block) {
-                // TODO json is lossy when storing floats as strings!
-                audio_stream_manager.send_block(audio_block);
+                audio_stream_manager->send_block(audio_block);
 
                 double avg_power = 0;
                 for (auto& sample : audio_block) {
@@ -137,16 +150,20 @@ int main() {
             spdlog::debug("finished stepping sim");
         }).detach();
 
-        res.set_content("Nice!", "text/plain");
+        // "No data" is appropriate here
+        res.status = 204;
     });
 
-    server.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+    server.set_logger([&](const httplib::Request& req, const httplib::Response& res) {
         if (res.status >= 400) {
             // assumes that body always contains error reason
             spdlog::error(res.body);
         }
 
         spdlog::info("{} {} -> {}", req.method, req.path, res.status);
+        for (auto& [id, wp] : audio_stream_managers) {
+            spdlog::debug("client id {} has {} usages", id, wp.use_count());
+        }
     });
 
     server.set_error_logger([](const httplib::Error& err, const httplib::Request* req) {
