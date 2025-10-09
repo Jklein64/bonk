@@ -1,3 +1,4 @@
+#include <base64.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <fmt/core.h>
@@ -14,11 +15,12 @@
 
 class StreamManager {
   public:
-    void send_block(const std::vector<double>& buffer) {
-        // TODO do base64 encoding here instead
-        nlohmann::json buffer_json(buffer);
+    void send_block(const std::vector<double>& block) {
+        // Fine as long as server is known little-endian and client parses that way too
+        const char* buffer = reinterpret_cast<const char*>(block.data());
+        std::string encoded = base64::encode_into<std::string>(&buffer[0], &buffer[block.size() * sizeof(double)]);
         std::unique_lock<std::mutex> lk(mutex);
-        message_queue.emplace(fmt::format("data: {}\n\n", buffer_json.dump()));
+        message_queue.emplace(fmt::format("data: {}\n\n", encoded));
         cv.notify_all();
     }
 

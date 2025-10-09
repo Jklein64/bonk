@@ -33,7 +33,8 @@ set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO NO) # Fails to link if this is YES, whi
 FetchContent_Declare(libnpy GIT_REPOSITORY https://github.com/matajoh/libnpy.git GIT_TAG v1.5.3)
 FetchContent_Declare(httplib GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git GIT_TAG v0.26.0)
 FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
-FetchContent_MakeAvailable(libnpy httplib json)
+FetchContent_Declare(base64 GIT_REPOSITORY https://github.com/tobiaslocker/base64.git GIT_TAG 0d0f5a8849a954d96af7befdb5c4014e78ecc9e2)
+FetchContent_MakeAvailable(libnpy httplib json base64)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
     ${Eigen_LIBRARIES} 
@@ -43,4 +44,5 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     httplib::httplib 
     nlohmann_json::nlohmann_json
     spdlog::spdlog
+    base64
 )
