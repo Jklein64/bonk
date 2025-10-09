@@ -43,29 +43,6 @@ class EventDispatcher {
 
 class StreamManager {
   public:
-    // Called repeatedly until completed with sink.done() and return false
-    bool chunked_content_provider(size_t, httplib::DataSink& sink) {
-        std::unique_lock<std::mutex> lk(mutex);
-        while (this->message_queue.empty()) {
-            // Wait until there's a queue element, catch spurious wakeups, and
-            // also send an SSE "comment" after ping_delay ms to prevent the
-            // client from thinking the connection is closed
-            if (cv.wait_for(lk, this->ping_delay) == std::cv_status::timeout) {
-                std::string message = ":\n\n";
-                sink.write(message.data(), message.size());
-            }
-        }
-
-        while (!this->message_queue.empty()) {
-            const std::string& message = this->message_queue.front();
-            sink.write(message.data(), message.size());
-            this->message_queue.pop();
-        }
-
-        // There is always a next chunk
-        return true;
-    }
-
     void send_block(const std::vector<double>& buffer) {
         // TODO do base64 encoding here instead
         nlohmann::json buffer_json(buffer);
@@ -73,6 +50,39 @@ class StreamManager {
         message_queue.emplace(fmt::format("data: {}\n\n", buffer_json.dump()));
         cv.notify_all();
     }
+
+    // Called repeatedly until completed with sink.done() and return false
+    const httplib::ContentProviderWithoutLength chunked_content_provider = [&](size_t, httplib::DataSink& sink) -> bool {
+        std::unique_lock<std::mutex> lk(mutex);
+        while (this->message_queue.empty()) {
+            // Wait until there's a queue element, catch spurious wakeups, and
+            // also send an SSE "comment" after ping_delay ms to prevent the
+            // client from thinking the connection is closed
+            if (cv.wait_for(lk, this->ping_delay) == std::cv_status::timeout) {
+                std::string message = ":\n\n";
+                if (sink.is_writable()) {
+                    sink.write(message.data(), message.size());
+                } else {
+                    sink.done();
+                    return true;
+                }
+            }
+        }
+
+        while (!this->message_queue.empty()) {
+            const std::string& message = this->message_queue.front();
+            if (sink.is_writable()) {
+                sink.write(message.data(), message.size());
+            } else {
+                sink.done();
+                return true;
+            }
+            this->message_queue.pop();
+        }
+
+        // There is always a next chunk
+        return true;
+    };
 
   private:
     std::queue<std::string> message_queue;
@@ -93,10 +103,9 @@ int main() {
         res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
-
-        using namespace std::placeholders;
-        res.set_chunked_content_provider("text/event-stream",
-                                         std::bind(&StreamManager::chunked_content_provider, &audio_stream_manager, _1, _2));
+        res.set_chunked_content_provider("text/event-stream", audio_stream_manager.chunked_content_provider, [](bool) {
+            // TODO remove the stream manager for this client
+        });
     });
 
     server.Post("/api/configure", [&](const httplib::Request& req, httplib::Response& res) {
@@ -170,10 +179,6 @@ int main() {
     server.set_error_logger([](const httplib::Error& err, const httplib::Request* req) {
         spdlog::error("{} while processing request", httplib::to_string(err));
         spdlog::error("{} {} -> :(", req->method, req->path);
-    });
-
-    server.set_post_routing_handler([](const auto& req, auto& res) {
-        spdlog::info("inside post routing handler");
     });
 
     spdlog::info("listening at http://0.0.0.0:3001");
