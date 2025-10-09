@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import { Canvas, type ThreeElements } from "@react-three/fiber";
 import "./index.css";
 import { useStream, type DataCallback } from "./hooks/useStream";
+import { UuidContext } from "./context/uuid";
+import useUuid from "./hooks/useUuid";
 
 function Wall(props: ThreeElements["mesh"]) {
   return (
@@ -18,6 +20,7 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
   const ref = useRef<THREE.Mesh>(null!);
   const [hover, setHover] = useState(false);
   const [clicking, setClicking] = useState(false);
+  const clientId = useUuid()
 
   const geometry = useMemo(() => {
     let geometry = new THREE.BufferGeometry();
@@ -61,7 +64,7 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
     // Hard-coded rest position of 1
     const displacement = ref.current.position.x - 1;
     if (Math.abs(displacement) > 1e-8) {
-      configureSim(displacement);
+      configureSim(clientId, displacement);
     }
   }
 
@@ -98,7 +101,7 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
 
 function App({ children }: { children: any }) {
   const audioContext = useRef(new AudioContext());
-  // const { subscribe, unsubscribe } = useStream("audio");
+  const { subscribe, unsubscribe } = useStream("audio");
 
   useEffect(() => {
     audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
@@ -114,24 +117,24 @@ function App({ children }: { children: any }) {
     // });
   }, []);
 
-  // useEffect(() => {
-  //   const callback: DataCallback = (data) => {
-  //     console.log("received data from the audio stream!");
-  //     console.log(data);
-  //   };
+  useEffect(() => {
+    const callback: DataCallback = (data) => {
+      console.log(data);
+    };
 
-  //   subscribe(callback);
+    subscribe(callback);
 
-  //   return () => {
-  //     unsubscribe(callback);
-  //   };
-  // });
+    return () => {
+      unsubscribe(callback);
+    };
+  });
 
   return <>{children}</>;
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
+    <UuidContext.Provider value={crypto.randomUUID()}>
     <App>
       <Canvas>
         <ambientLight intensity={Math.PI / 2} />
@@ -141,6 +144,7 @@ createRoot(document.getElementById("root")!).render(
         <TrianglePrism position={[1, 0, 0]} />
       </Canvas>
     </App>
+    </UuidContext.Provider>
   </StrictMode>
 );
 
@@ -150,7 +154,7 @@ function getColor(name: string) {
   return value;
 }
 
-function configureSim(displacement: number) {
+function configureSim(clientId: string, displacement: number) {
   const params = {
     physicsSampleRate: 1000000,
     physicsBlockSize: 512,
@@ -170,7 +174,7 @@ function configureSim(displacement: number) {
   };
 
   console.log({ params, initialState });
-  fetch("/api/configure", {
+  fetch(`/api/configure/${clientId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ params, initialState }),
