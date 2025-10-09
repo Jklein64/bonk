@@ -3,11 +3,13 @@
 #include <condition_variable>
 #include <fmt/core.h>
 #include <httplib.h>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <queue>
 #include <spdlog/spdlog.h>
 #include <string>
+#include <unordered_map>
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
@@ -24,7 +26,8 @@ class StreamManager {
         cv.notify_all();
     }
 
-    void process(std::function<void(const std::string&)> write_callback) {
+    // process returns whether there are no errors, write_callback returns whether there is more
+    bool process(std::function<bool(const std::string&)> write_callback) {
         std::unique_lock<std::mutex> lk(mutex);
         while (this->message_queue.empty()) {
             // Wait until there's a queue element, catch spurious wakeups, and
@@ -32,15 +35,21 @@ class StreamManager {
             // client from thinking the connection is closed
             if (cv.wait_for(lk, this->ping_delay) == std::cv_status::timeout) {
                 std::string message = ":\n\n";
-                write_callback(message);
+                if (!write_callback(message)) {
+                    return true;
+                }
             }
         }
 
         while (!this->message_queue.empty()) {
             const std::string& message = this->message_queue.front();
-            write_callback(message);
+            if (!write_callback(message)) {
+                return true;
+            }
             this->message_queue.pop();
         }
+
+        return true;
     }
 
   private:
@@ -56,26 +65,41 @@ int main() {
 #endif
 
     httplib::Server server;
-    StreamManager audio_stream_manager;
+    std::unordered_map<std::string, std::shared_ptr<StreamManager>> audio_stream_managers;
 
-    server.Get("/api/stream/audio/:id", [&](const httplib::Request&, httplib::Response& res) {
+    server.Get("/api/stream/audio/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        std::string client_id = req.path_params.at("id");
+        if (!audio_stream_managers.contains(client_id)) {
+            audio_stream_managers.insert({client_id, std::make_shared<StreamManager>()});
+        }
+        auto audio_sm = audio_stream_managers.find(client_id)->second;
+        spdlog::debug("configured StreamManager for client id {}", client_id);
+        for (auto& [id, ptr] : audio_stream_managers) {
+            spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
+        }
+
         res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
         res.set_chunked_content_provider(
             "text/event-stream",
-            [&](size_t, httplib::DataSink& sink) {
-                audio_stream_manager.process([&sink](const std::string& message) {
+            [audio_sm](size_t, httplib::DataSink& sink) {
+                return audio_sm->process([&sink](const std::string& message) {
                     if (sink.is_writable()) {
                         sink.write(message.data(), message.size());
+                        return true;
                     } else {
                         sink.done();
+                        return false;
                     }
                 });
-                return true;
             },
-            [](bool) {
+            [&](bool) {
                 // TODO remove the stream manager for this client
+                spdlog::debug("inside releaser");
+                for (auto& [id, ptr] : audio_stream_managers) {
+                    spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
+                }
             });
     });
 
@@ -107,14 +131,22 @@ int main() {
             return;
         }
 
-        // Capturing params and initial_state by reference might use-after-free
-        std::thread([&audio_stream_manager, params, initial_state]() {
+        std::string client_id = req.path_params.at("id");
+        auto it = audio_stream_managers.find(client_id);
+        if (it == audio_stream_managers.end()) {
+            res.status = 400;
+            res.body = "nothing with that client ID, sorry";
+            return;
+        }
+        auto audio_sm = audio_stream_managers.find(client_id)->second;
+        // Capturing by reference might use-after-free
+        std::thread([=]() {
             Sim sim;
             bool should_step = true;
             sim.configure(params, initial_state);
             sim.set_audio_callback([&](auto& audio_block) {
                 // TODO json is lossy when storing floats as strings!
-                audio_stream_manager.enqueue(audio_block);
+                audio_sm->enqueue(audio_block);
 
                 double avg_power = 0;
                 for (auto& sample : audio_block) {
