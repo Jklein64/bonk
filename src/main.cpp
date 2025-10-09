@@ -12,35 +12,6 @@
 
 #include "sim.h"
 
-class EventDispatcher {
-  public:
-    EventDispatcher() {}
-
-    void wait_event(httplib::DataSink& sink) {
-        std::unique_lock<std::mutex> lk(m_);
-        int id = id_;
-        cv_.wait(lk, [&] {
-            return cid_ == id;
-        });
-        spdlog::debug("writing {} bytes to sink", message_.size());
-        sink.write(message_.data(), message_.size());
-    }
-
-    void send_event(const std::string& message) {
-        std::lock_guard<std::mutex> lk(m_);
-        cid_ = id_++;
-        message_ = message;
-        cv_.notify_all();
-    }
-
-  private:
-    std::mutex m_;
-    std::condition_variable cv_;
-    std::atomic_int id_{0};
-    std::atomic_int cid_{-1};
-    std::string message_;
-};
-
 class StreamManager {
   public:
     void send_block(const std::vector<double>& buffer) {
