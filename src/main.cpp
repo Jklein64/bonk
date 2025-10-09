@@ -9,6 +9,7 @@
 #include <queue>
 #include <spdlog/spdlog.h>
 #include <string>
+#include <thread>
 #include <unordered_map>
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
@@ -65,42 +66,38 @@ int main() {
 #endif
 
     httplib::Server server;
-    std::unordered_map<std::string, std::shared_ptr<StreamManager>> audio_stream_managers;
+    std::unordered_map<std::string, std::weak_ptr<StreamManager>> audio_stream_managers;
+
+    std::thread([&audio_stream_managers]() {
+        while (true) {
+            spdlog::debug("inside tick tock thread");
+            for (auto& [id, ptr] : audio_stream_managers) {
+                spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }).detach();
 
     server.Get("/api/stream/audio/:id", [&](const httplib::Request& req, httplib::Response& res) {
         std::string client_id = req.path_params.at("id");
-        if (!audio_stream_managers.contains(client_id)) {
-            audio_stream_managers.insert({client_id, std::make_shared<StreamManager>()});
-        }
-        auto audio_sm = audio_stream_managers.find(client_id)->second;
+        auto audio_sm = std::make_shared<StreamManager>();
+        audio_stream_managers.insert_or_assign(client_id, audio_sm);
         spdlog::debug("configured StreamManager for client id {}", client_id);
-        for (auto& [id, ptr] : audio_stream_managers) {
-            spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
-        }
 
         res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider(
-            "text/event-stream",
-            [audio_sm](size_t, httplib::DataSink& sink) {
-                return audio_sm->process([&sink](const std::string& message) {
-                    if (sink.is_writable()) {
-                        sink.write(message.data(), message.size());
-                        return true;
-                    } else {
-                        sink.done();
-                        return false;
-                    }
-                });
-            },
-            [&](bool) {
-                // TODO remove the stream manager for this client
-                spdlog::debug("inside releaser");
-                for (auto& [id, ptr] : audio_stream_managers) {
-                    spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
+        res.set_chunked_content_provider("text/event-stream", [audio_sm](size_t, httplib::DataSink& sink) {
+            return audio_sm->process([&sink](const std::string& message) {
+                if (sink.is_writable()) {
+                    sink.write(message.data(), message.size());
+                    return true;
+                } else {
+                    sink.done();
+                    return false;
                 }
             });
+        });
     });
 
     server.Post("/api/configure/:id", [&](const httplib::Request& req, httplib::Response& res) {
@@ -138,7 +135,11 @@ int main() {
             res.body = "nothing with that client ID, sorry";
             return;
         }
-        auto audio_sm = audio_stream_managers.find(client_id)->second;
+        auto audio_sm_wk = audio_stream_managers.find(client_id)->second;
+        if (audio_sm_wk.expired()) {
+            spdlog::warn("oh no expired!");
+        }
+        auto audio_sm = audio_sm_wk.lock();
         // Capturing by reference might use-after-free
         std::thread([=]() {
             Sim sim;
@@ -170,13 +171,16 @@ int main() {
         res.set_content("Nice!", "text/plain");
     });
 
-    server.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+    server.set_logger([&](const httplib::Request& req, const httplib::Response& res) {
         if (res.status >= 400) {
             // assumes that body always contains error reason
             spdlog::error(res.body);
         }
 
         spdlog::info("{} {} -> {}", req.method, req.path, res.status);
+        for (auto& [id, ptr] : audio_stream_managers) {
+            spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
+        }
     });
 
     server.set_error_logger([](const httplib::Error& err, const httplib::Request* req) {
