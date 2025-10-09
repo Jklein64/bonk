@@ -15,7 +15,7 @@
 
 class StreamManager {
   public:
-    void send_block(const std::vector<double>& block) {
+    void enqueue(const std::vector<double>& block) {
         // Fine as long as server is known little-endian and client parses that way too
         const char* buffer = reinterpret_cast<const char*>(block.data());
         std::string encoded = base64::encode_into<std::string>(&buffer[0], &buffer[block.size() * sizeof(double)]);
@@ -24,8 +24,7 @@ class StreamManager {
         cv.notify_all();
     }
 
-    // Called repeatedly until completed with sink.done() and return false
-    const httplib::ContentProviderWithoutLength chunked_content_provider = [&](size_t, httplib::DataSink& sink) -> bool {
+    void process(std::function<void(const std::string&)> write_callback) {
         std::unique_lock<std::mutex> lk(mutex);
         while (this->message_queue.empty()) {
             // Wait until there's a queue element, catch spurious wakeups, and
@@ -33,29 +32,16 @@ class StreamManager {
             // client from thinking the connection is closed
             if (cv.wait_for(lk, this->ping_delay) == std::cv_status::timeout) {
                 std::string message = ":\n\n";
-                if (sink.is_writable()) {
-                    sink.write(message.data(), message.size());
-                } else {
-                    sink.done();
-                    return true;
-                }
+                write_callback(message);
             }
         }
 
         while (!this->message_queue.empty()) {
             const std::string& message = this->message_queue.front();
-            if (sink.is_writable()) {
-                sink.write(message.data(), message.size());
-            } else {
-                sink.done();
-                return true;
-            }
+            write_callback(message);
             this->message_queue.pop();
         }
-
-        // There is always a next chunk
-        return true;
-    };
+    }
 
   private:
     std::queue<std::string> message_queue;
@@ -70,18 +56,30 @@ int main() {
 #endif
 
     httplib::Server server;
-
     StreamManager audio_stream_manager;
-    server.Get("/api/stream/audio", [&](const httplib::Request&, httplib::Response& res) {
+
+    server.Get("/api/stream/audio/:id", [&](const httplib::Request&, httplib::Response& res) {
         res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider("text/event-stream", audio_stream_manager.chunked_content_provider, [](bool) {
-            // TODO remove the stream manager for this client
-        });
+        res.set_chunked_content_provider(
+            "text/event-stream",
+            [&](size_t, httplib::DataSink& sink) {
+                audio_stream_manager.process([&sink](const std::string& message) {
+                    if (sink.is_writable()) {
+                        sink.write(message.data(), message.size());
+                    } else {
+                        sink.done();
+                    }
+                });
+                return true;
+            },
+            [](bool) {
+                // TODO remove the stream manager for this client
+            });
     });
 
-    server.Post("/api/configure", [&](const httplib::Request& req, httplib::Response& res) {
+    server.Post("/api/configure/:id", [&](const httplib::Request& req, httplib::Response& res) {
         SimParams params;
         SimState initial_state;
 
@@ -116,7 +114,7 @@ int main() {
             sim.configure(params, initial_state);
             sim.set_audio_callback([&](auto& audio_block) {
                 // TODO json is lossy when storing floats as strings!
-                audio_stream_manager.send_block(audio_block);
+                audio_stream_manager.enqueue(audio_block);
 
                 double avg_power = 0;
                 for (auto& sample : audio_block) {
