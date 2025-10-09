@@ -68,13 +68,15 @@ int main() {
     httplib::Server server;
     std::unordered_map<std::string, std::weak_ptr<StreamManager>> audio_stream_managers;
 
+    // Occasionally purge decayed weak_ptr values
     std::thread([&audio_stream_managers]() {
         while (true) {
-            spdlog::debug("inside tick tock thread");
             for (auto& [id, ptr] : audio_stream_managers) {
-                spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
+                if (ptr.use_count() == 0) {
+                    audio_stream_managers.erase(id);
+                }
             }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
     }).detach();
 
@@ -129,23 +131,18 @@ int main() {
         }
 
         std::string client_id = req.path_params.at("id");
-        auto it = audio_stream_managers.find(client_id);
-        if (it == audio_stream_managers.end()) {
+        if (!audio_stream_managers.contains(client_id)) {
             res.status = 400;
-            res.body = "nothing with that client ID, sorry";
+            res.body = fmt::format("No audio stream exists for client id {}.", client_id);
             return;
         }
-        auto audio_sm_wk = audio_stream_managers.find(client_id)->second;
-        if (audio_sm_wk.expired()) {
-            spdlog::warn("oh no expired!");
-        }
-        auto audio_sm = audio_sm_wk.lock();
+        std::shared_ptr<StreamManager> audio_sm = audio_stream_managers.find(client_id)->second.lock();
         // Capturing by reference might use-after-free
         std::thread([=]() {
             Sim sim;
             bool should_step = true;
             sim.configure(params, initial_state);
-            sim.set_audio_callback([&](auto& audio_block) {
+            sim.set_audio_callback([audio_sm, &should_step](auto& audio_block) {
                 // TODO json is lossy when storing floats as strings!
                 audio_sm->enqueue(audio_block);
 
@@ -154,7 +151,6 @@ int main() {
                     avg_power += sample * sample;
                 }
 
-                // spdlog::debug("average power is {}", avg_power);
                 // Stop when a block is silent (< -60 dB power)
                 if (avg_power < 1e-6) {
                     should_step = false;
@@ -168,7 +164,8 @@ int main() {
             spdlog::debug("finished stepping sim");
         }).detach();
 
-        res.set_content("Nice!", "text/plain");
+        // "No data" makes sense here
+        res.status = 204;
     });
 
     server.set_logger([&](const httplib::Request& req, const httplib::Response& res) {
