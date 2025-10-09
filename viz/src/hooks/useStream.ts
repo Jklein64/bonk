@@ -1,36 +1,30 @@
 import { useEffect, useRef, type RefObject } from "react";
 import useUuid from "../hooks/useUuid";
 
-// work with base64 strings for now
-export type DataCallback = (data: string) => void;
+export type DataCallback = (data: ArrayBuffer) => void;
 
 export function useStream(name: string) {
   const clientId = useUuid();
   const streamUrl = `/api/stream/${name}/${clientId}`;
   const source = useRef<EventSource>(null!);
-  
+
   const subscribers: RefObject<Set<DataCallback>> = useRef(new Set());
-  
+
   useEffect(() => {
     console.log("creating event source with url " + streamUrl);
-    const es = new EventSource(streamUrl)
-    source.current = es
-
-    es.onopen = (ev) => {
-      console.log("opened stream!");
-      console.log(ev);
-    };
+    const es = new EventSource(streamUrl);
+    source.current = es;
 
     es.onmessage = (ev) => {
+      const buffer = Uint8Array.from(atob(ev.data), (c) => c.charCodeAt(0)).buffer;
       for (const callback of subscribers.current) {
-        callback(ev.data);
+        callback(buffer);
       }
     };
 
     return () => {
-      console.log("closing stream!")
-      source.current.close()
-    }
+      source.current.close();
+    };
   }, []);
 
   function subscribe(callback: DataCallback) {

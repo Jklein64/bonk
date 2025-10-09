@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { useRef, useState, StrictMode, useMemo, useEffect } from "react";
+import React, { useRef, useState, StrictMode, useMemo, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas, type ThreeElements } from "@react-three/fiber";
 import "./index.css";
@@ -16,11 +16,14 @@ function Wall(props: ThreeElements["mesh"]) {
   );
 }
 
-function TrianglePrism(props: ThreeElements["mesh"]) {
+type TrianglePrismProps = ThreeElements["mesh"] & {
+  onSpringRelease?: (x: number) => void;
+};
+
+const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props }) => {
   const ref = useRef<THREE.Mesh>(null!);
   const [hover, setHover] = useState(false);
   const [clicking, setClicking] = useState(false);
-  const clientId = useUuid()
 
   const geometry = useMemo(() => {
     let geometry = new THREE.BufferGeometry();
@@ -64,7 +67,7 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
     // Hard-coded rest position of 1
     const displacement = ref.current.position.x - 1;
     if (Math.abs(displacement) > 1e-8) {
-      configureSim(clientId, displacement);
+      onSpringRelease?.(displacement);
     }
   }
 
@@ -97,53 +100,101 @@ function TrianglePrism(props: ThreeElements["mesh"]) {
       <meshStandardMaterial color={color} />
     </mesh>
   );
-}
+};
 
-function App({ children }: { children: any }) {
+function App() {
   const audioContext = useRef(new AudioContext());
+  const bonkWorkletNode = useRef<AudioWorkletNode>(null);
   const { subscribe, unsubscribe } = useStream("audio");
+  const clientId = useUuid();
 
   useEffect(() => {
+    const callback: DataCallback = (buffer) => {
+      if (!bonkWorkletNode.current) return;
+      bonkWorkletNode.current.port.postMessage(buffer, [buffer]);
+    };
+
     audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
-      const bonkWorkletNode = new AudioWorkletNode(audioContext.current, "bonk-processor");
-      bonkWorkletNode.connect(audioContext.current.destination);
+      if (bonkWorkletNode.current) {
+        // Disconnect old node before replacing. Have to signal to get process() to return false
+        // See https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletProcessor/process#return_value
+        bonkWorkletNode.current.port.postMessage("stop");
+        bonkWorkletNode.current.disconnect();
+        bonkWorkletNode.current.port.close();
+      }
+      bonkWorkletNode.current = new AudioWorkletNode(audioContext.current, "bonk-processor");
+      bonkWorkletNode.current.connect(audioContext.current.destination);
+      bonkWorkletNode.current.port.start();
     });
 
-    // See https://developer.chrome.com/blog/autoplay/#web_audio
-    // window.addEventListener("click", () => {
-    //   if (audioContext.current.state === "suspended") {
-    //     audioContext.current.resume();
-    //   }
-    // });
-  }, []);
-
-  useEffect(() => {
-    const callback: DataCallback = (data) => {
-      console.log(data);
-    };
+    window.addEventListener("click", () => {
+      if (audioContext.current.state === "suspended") {
+        audioContext.current.resume();
+      }
+    });
 
     subscribe(callback);
 
     return () => {
       unsubscribe(callback);
     };
-  });
+  }, []);
 
-  return <>{children}</>;
-}
+  const onSpringRelease = (x: number) => {
+    const params = {
+      physicsSampleRate: 1000000,
+      physicsBlockSize: 512,
+      audioSampleRate: 48000,
+      audioBlockSize: 128,
+      vizSampleRate: 30,
+      vizBlockSize: 5,
+      // These sound okay...
+      mass: 0.005,
+      stiffness: 3000,
+      damping: 0.12,
+      area: 1,
+    };
+    const initialState = {
+      x,
+      v: 0,
+    };
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <UuidContext.Provider value={crypto.randomUUID()}>
-    <App>
+    for (const [key, value] of Object.entries(params)) {
+      if (!bonkWorkletNode.current) break;
+      const currentTime = audioContext.current.currentTime;
+      const param = bonkWorkletNode.current.parameters.get(key);
+      if (param) {
+        console.log(`setting params.${key} = ${value}`);
+        param.setValueAtTime(value, currentTime);
+      } else {
+        console.warn(`failed to set params.${key}`);
+      }
+    }
+
+    fetch(`/api/configure/${clientId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ params, initialState }),
+    }).catch((err) => console.error(err));
+  };
+
+  return (
+    <>
       <Canvas>
         <ambientLight intensity={Math.PI / 2} />
         <spotLight position={[10, 20, 20]} angle={0.15} penumbra={1} decay={0.125} intensity={Math.PI} />
         <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
         <Wall position={[-1, 0, 0]} />
-        <TrianglePrism position={[1, 0, 0]} />
+        <TrianglePrism position={[1, 0, 0]} onSpringRelease={onSpringRelease} />
       </Canvas>
-    </App>
+    </>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <UuidContext.Provider value={crypto.randomUUID()}>
+      <App />
     </UuidContext.Provider>
   </StrictMode>
 );
@@ -152,31 +203,4 @@ function getColor(name: string) {
   const value = getComputedStyle(document.documentElement).getPropertyValue(`--color-${name}`);
   if (value === "") console.warn(`No color found with name ${name}.`);
   return value;
-}
-
-function configureSim(clientId: string, displacement: number) {
-  const params = {
-    physicsSampleRate: 1000000,
-    physicsBlockSize: 512,
-    audioSampleRate: 48000,
-    audioBlockSize: 128,
-    vizSampleRate: 30,
-    vizBlockSize: 5,
-    // These sound okay...
-    mass: 0.005,
-    stiffness: 3000,
-    damping: 0.12,
-    area: 1,
-  };
-  const initialState = {
-    x: displacement,
-    v: 0,
-  };
-
-  console.log({ params, initialState });
-  fetch(`/api/configure/${clientId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ params, initialState }),
-  }).catch((err) => console.error(err));
 }
