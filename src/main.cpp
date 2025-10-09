@@ -16,8 +16,30 @@
 
 #include "sim.h"
 
+enum class StreamType { audio, viz };
+
 class StreamManager {
   public:
+    StreamManager() = delete;
+    ~StreamManager() {
+        auto& stream_managers =
+            (type == StreamType::audio) ? StreamManager::audio_stream_managers : StreamManager::viz_stream_managers;
+        // Invariant: the weak_ptr count is zero for this->client_id
+        stream_managers.erase(this->client_id);
+    }
+
+    static std::shared_ptr<StreamManager> get_or_create(const std::string& client_id, StreamType type) {
+        auto& stream_managers =
+            (type == StreamType::audio) ? StreamManager::audio_stream_managers : StreamManager::viz_stream_managers;
+        if (stream_managers.contains(client_id)) {
+            return stream_managers.find(client_id)->second.lock();
+        } else {
+            std::shared_ptr<StreamManager> ptr(new StreamManager(client_id, type));
+            stream_managers.insert_or_assign(client_id, ptr);
+            return ptr;
+        }
+    }
+
     void enqueue(const std::vector<double>& block) {
         // Fine as long as server is known little-endian and client parses that way too
         const char* buffer = reinterpret_cast<const char*>(block.data());
@@ -53,7 +75,18 @@ class StreamManager {
         return true;
     }
 
+    inline static std::unordered_map<std::string, std::weak_ptr<StreamManager>> audio_stream_managers;
+    inline static std::unordered_map<std::string, std::weak_ptr<StreamManager>> viz_stream_managers;
+
+  protected:
+    StreamManager(const std::string& client_id, StreamType type) {
+        this->client_id = client_id;
+        this->type = type;
+    }
+
   private:
+    StreamType type;
+    std::string client_id;
     std::queue<std::string> message_queue;
     const std::chrono::milliseconds ping_delay{5000};
     std::condition_variable cv;
@@ -66,24 +99,10 @@ int main() {
 #endif
 
     httplib::Server server;
-    std::unordered_map<std::string, std::weak_ptr<StreamManager>> audio_stream_managers;
-
-    // Occasionally purge decayed weak_ptr values
-    std::thread([&audio_stream_managers]() {
-        while (true) {
-            for (auto& [id, ptr] : audio_stream_managers) {
-                if (ptr.use_count() == 0) {
-                    audio_stream_managers.erase(id);
-                }
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
-    }).detach();
 
     server.Get("/api/stream/audio/:id", [&](const httplib::Request& req, httplib::Response& res) {
         std::string client_id = req.path_params.at("id");
-        auto audio_sm = std::make_shared<StreamManager>();
-        audio_stream_managers.insert_or_assign(client_id, audio_sm);
+        auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
         spdlog::debug("configured StreamManager for client id {}", client_id);
 
         res.set_header("Transfer-Encoding", "chunked");
@@ -131,12 +150,7 @@ int main() {
         }
 
         std::string client_id = req.path_params.at("id");
-        if (!audio_stream_managers.contains(client_id)) {
-            res.status = 400;
-            res.body = fmt::format("No audio stream exists for client id {}.", client_id);
-            return;
-        }
-        std::shared_ptr<StreamManager> audio_sm = audio_stream_managers.find(client_id)->second.lock();
+        auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
         // Capturing by reference might use-after-free
         std::thread([=]() {
             Sim sim;
@@ -175,9 +189,6 @@ int main() {
         }
 
         spdlog::info("{} {} -> {}", req.method, req.path, res.status);
-        for (auto& [id, ptr] : audio_stream_managers) {
-            spdlog::debug("client id {} has a manager with {} references", id, ptr.use_count());
-        }
     });
 
     server.set_error_logger([](const httplib::Error& err, const httplib::Request* req) {
