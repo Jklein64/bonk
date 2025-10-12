@@ -12,7 +12,7 @@ void Sim::configure(const SimParams& params, const SimState& initial_state) {
     this->steps_until_audio_sample = 0;
     // The floor from integer division means this will never go below the audio sample rate
     this->audio_decimation_factor = params.physics_sample_rate / params.audio_sample_rate;
-    this->audio_aa_filter.setup(params.physics_sample_rate, params.audio_sample_rate);
+    this->audio_aa_filter.setup(params.physics_sample_rate, params.audio_sample_rate / 2.);
     // Uninitialized std::function values are NOT just no-ops, and throw std::bad_function_call
     this->physics_callback = [](auto&) {};
     this->audio_callback = [](auto&) {};
