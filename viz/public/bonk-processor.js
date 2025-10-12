@@ -17,11 +17,11 @@ class BonkProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super(options);
 
-    console.log("boop!");
-    this.port.start();
     this.blocks = [];
     this.sampleIdx = 0;
     this.shouldStop = false;
+
+    this.port.start();
     this.port.addEventListener("message", (messageEvent) => {
       if (messageEvent.data === "stop") {
         this.shouldStop = true;
@@ -38,39 +38,23 @@ class BonkProcessor extends AudioWorkletProcessor {
     }
 
     const audioBlockSize = parameters.audioBlockSize[0];
-    if (globalThis.currentFrame % (128 * 128) === 0) {
-      console.log(parameters.audioBlockSize);
+    if (audioBlockSize !== 128) {
+      console.error("poop!");
     }
-    // if (audioBlockSize != 128) {
-    //   console.error("poop");
-    // }
-    // if (this.blocks.length > 0) {
-    //   this.blocks.splice(0, 1);
-    // }
-    // for (let i = 0; i < outputs[0][0].length; i++) {
-    //   const blockIdx = Math.floor(this.sampleIdx / audioBlockSize);
-    //   if (blockIdx >= this.blocks.length) {
-    //     this.sampleIdx--;
-    //   } else {
-    //     const sampleIdxWithinBlock = this.sampleIdx % audioBlockSize;
-    //     const sample = this.blocks[blockIdx][sampleIdxWithinBlock];
-    //     for (const output of outputs) {
-    //       for (const channel of output) {
-    //         channel[i] = sample;
-    //       }
-    //     }
-    //   }
-    //   this.sampleIdx++;
-    // }
-    // currentFrame is a bad name for this because it has units of samples
-    // const currentSample = globalThis.currentFrame;
-    // for (const output of outputs) {
-    //   for (const channel of output) {
-    //     for (let i = 0; i < channel.length; i++) {
-    //       channel[i] = Math.random() * 2 - 1;
-    //     }
-    //   }
-    // }
+
+    // Play a block if there is one
+    if (this.blocks.length > 0) {
+      for (const output of outputs) {
+        for (const channel of output) {
+          for (let i = 0; i < channel.length; i++) {
+            channel[i] = this.blocks[0][i];
+          }
+        }
+      }
+
+      this.blocks.splice(0, 1);
+    }
+
     // still in use
     return true;
   }

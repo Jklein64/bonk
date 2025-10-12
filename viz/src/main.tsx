@@ -103,7 +103,8 @@ const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props
 };
 
 function App() {
-  const audioContext = useRef(new AudioContext());
+  // TODO adjust the sample rate based on the parameters
+  const audioContext = useRef(new AudioContext({ sampleRate: 48000 }));
   const bonkWorkletNode = useRef<AudioWorkletNode>(null);
   const { subscribe, unsubscribe } = useStream("audio");
   const clientId = useUuid();
