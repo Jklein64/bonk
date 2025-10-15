@@ -1,12 +1,8 @@
-#include <base64.hpp>
 #include <chrono>
-#include <condition_variable>
-#include <fmt/core.h>
+#include <cstddef>
 #include <httplib.h>
 #include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
-#include <queue>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
@@ -14,42 +10,8 @@
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
-#include "connection.h"
+#include "event_stream.h"
 #include "sim.h"
-
-enum class StreamType { audio, viz };
-
-class StreamManager {
-  public:
-    void enqueue(Event&& event) {
-        std::unique_lock<std::mutex> lk(mutex);
-        message_queue.push(event);
-        cv.notify_all();
-    }
-
-    // process returns whether there are no errors, write_callback returns whether there is more
-    bool process(std::function<bool(const std::string&)> write_callback) {
-        std::unique_lock<std::mutex> lk(mutex);
-        while (this->message_queue.empty()) {
-            cv.wait(lk);
-        }
-
-        while (!this->message_queue.empty()) {
-            const Event& e = this->message_queue.front();
-            if (!write_callback(e.to_string())) {
-                return true;
-            }
-            this->message_queue.pop();
-        }
-
-        return true;
-    }
-
-  private:
-    std::queue<Event> message_queue;
-    std::condition_variable cv;
-    std::mutex mutex;
-};
 
 int main() {
 #ifdef ENABLE_DEBUG_LOGS
@@ -57,15 +19,13 @@ int main() {
 #endif
 
     httplib::Server server;
-    // std::unordered_map<std::string, std::weak_ptr<Connection>> connections;
-    // std::unordered_map<std::string, std::weak_ptr<EventStream>> event_streams;
     std::unordered_map<std::string, SimParams> configs;
-    std::unordered_map<std::string, std::shared_ptr<StreamManager>> stream_managers;
+    std::unordered_map<std::string, std::shared_ptr<EventStream>> event_streams;
 
     std::thread([&]() {
         while (true) {
-            for (auto& [id, manager] : stream_managers) {
-                spdlog::debug("id {} has refcount {}", id, manager.use_count());
+            for (auto& [id, stream] : event_streams) {
+                spdlog::debug("id {} has refcount {}", id, stream.use_count());
             }
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -73,17 +33,14 @@ int main() {
 
     server.Get("/api/sim/stream/:id", [&](const httplib::Request& req, httplib::Response& res) {
         std::string client_id = req.path_params.at("id");
-        if (!stream_managers.contains(client_id)) {
-            spdlog::debug("configured new StreamManager for client id {}", client_id);
-            stream_managers.insert({client_id, std::make_shared<StreamManager>()});
-        } else {
-            spdlog::debug("retrieved StreamManager for client id {}", client_id);
-        }
-        auto audio_sm = stream_managers.at(client_id);
+        if (!event_streams.contains(client_id))
+            event_streams.insert({client_id, std::make_shared<EventStream>()});
+        auto event_stream = event_streams.at(client_id);
+        spdlog::info("GET /api/sim/stream/{} -> (streaming)", client_id);
 
-        std::thread([audio_sm]() {
+        std::thread([event_stream]() {
             while (true) {
-                audio_sm->enqueue(Event::from_heartbeat());
+                event_stream->send(Event::from_heartbeat());
                 std::this_thread::sleep_for(std::chrono::seconds(5));
             }
         }).detach();
@@ -93,9 +50,10 @@ int main() {
         res.set_header("Connection", "keep-alive");
         res.set_chunked_content_provider(
             "text/event-stream",
-            [audio_sm](size_t, httplib::DataSink& sink) {
-                return audio_sm->process([&sink](const std::string& message) {
+            [event_stream](size_t, httplib::DataSink& sink) {
+                event_stream->on_event([&sink](const Event& event) {
                     if (sink.is_writable()) {
+                        const std::string& message = event.to_string();
                         sink.write(message.data(), message.size());
                         return true;
                     } else {
@@ -103,11 +61,13 @@ int main() {
                         return false;
                     }
                 });
+                // False means the connection should be cancelled
+                return true;
             },
-            [&stream_managers, client_id](bool success) {
+            [&event_streams, client_id](bool success) {
                 // If stream_managers owned the StreamManager objects, this would be UB since
                 // it would free a (likely) locked mutex. Instead, just decrement reference count
-                stream_managers.erase(client_id);
+                event_streams.erase(client_id);
             });
     });
 
@@ -158,18 +118,17 @@ int main() {
             return;
         }
 
-        // auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
-        if (!stream_managers.contains(client_id))
-            stream_managers.insert({client_id, std::make_shared<StreamManager>()});
-        auto audio_sm = stream_managers.at(client_id);
-        auto params = configs.at(client_id);
-        // Capturing by reference might use-after-free
-        std::thread([=]() {
+        std::thread([initial_state, client_id, &configs, &event_streams]() {
             Sim sim;
             bool should_step = true;
+            SimParams params = configs.at(client_id);
             sim.configure(params, initial_state);
-            sim.set_audio_callback([audio_sm, &should_step](auto& audio_block) {
-                audio_sm->enqueue(Event::from_audio_block(audio_block));
+
+            std::shared_ptr<EventStream> event_stream = event_streams.contains(client_id) ? event_streams.at(client_id) : nullptr;
+            sim.set_audio_callback([event_stream, &should_step](auto& audio_block) {
+                if (event_stream != nullptr) {
+                    event_stream->send(Event::from_audio_block(audio_block));
+                }
 
                 double avg_power = 0;
                 for (auto& sample : audio_block) {
@@ -191,64 +150,6 @@ int main() {
 
         // "No data" makes sense here
         res.status = 204;
-
-        // SimState initial_state;
-
-        // try {
-        //     auto json_body = nlohmann::json::parse(req.body);
-        //     params = {
-        //         .physics_sample_rate = json_body["params"]["physicsSampleRate"],
-        //         .physics_block_size = json_body["params"]["physicsBlockSize"],
-        //         .audio_sample_rate = json_body["params"]["audioSampleRate"],
-        //         .audio_block_size = json_body["params"]["audioBlockSize"],
-        //         .viz_sample_rate = json_body["params"]["vizSampleRate"],
-        //         .viz_block_size = json_body["params"]["vizBlockSize"],
-        //         .mass = json_body["params"]["mass"],
-        //         .stiffness = json_body["params"]["stiffness"],
-        //         .damping = json_body["params"]["damping"],
-        //         .area = json_body["params"]["area"],
-        //     };
-        //     initial_state = {
-        //         .x = json_body["initialState"]["x"],
-        //         .v = json_body["initialState"]["v"],
-        //     };
-        // } catch (nlohmann::json::exception e) {
-        //     res.status = 400;
-        //     res.body = e.what();
-        //     return;
-        // }
-
-        // std::string client_id = req.path_params.at("id");
-        // auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
-        // // Capturing by reference might use-after-free
-        // std::thread([=]() {
-        //     Sim sim;
-        //     bool should_step = true;
-        //     sim.configure(params, initial_state);
-        //     sim.set_audio_callback([audio_sm, &should_step](auto& audio_block) {
-        //         // TODO json is lossy when storing floats as strings!
-        //         audio_sm->enqueue(audio_block);
-
-        //         double avg_power = 0;
-        //         for (auto& sample : audio_block) {
-        //             avg_power += sample * sample;
-        //         }
-
-        //         // Stop when a block is silent (< -60 dB power)
-        //         if (avg_power < 1e-6) {
-        //             should_step = false;
-        //         }
-        //     });
-
-        //     double dt = 1. / params.physics_sample_rate;
-        //     while (should_step) {
-        //         sim.step(dt);
-        //     }
-        //     spdlog::debug("finished stepping sim");
-        // }).detach();
-
-        // // "No data" makes sense here
-        // res.status = 204;
     });
 
     server.set_logger([&](const httplib::Request& req, const httplib::Response& res) {
