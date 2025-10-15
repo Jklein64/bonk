@@ -1,5 +1,6 @@
 {
-    "cmake.enableAutomaticKitScan": false,
-    "cmake.generator": "Unix Makefiles",
-    "clangd.path": "clangd-18"
+  "cmake.enableAutomaticKitScan": false,
+  "cmake.generator": "Unix Makefiles",
+  "clangd.path": "clangd-18",
+  "explorer.sortOrder": "default"
 }

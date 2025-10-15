@@ -14,6 +14,7 @@
 // #include <npy/npy.h>
 // #include <npy/tensor.h>
 
+#include "connection.h"
 #include "sim.h"
 
 enum class StreamType { audio, viz };
@@ -41,11 +42,8 @@ class StreamManager {
     }
 
     void enqueue(const std::vector<double>& block) {
-        // Fine as long as server is known little-endian and client parses that way too
-        const char* buffer = reinterpret_cast<const char*>(block.data());
-        std::string encoded = base64::encode_into<std::string>(&buffer[0], &buffer[block.size() * sizeof(double)]);
         std::unique_lock<std::mutex> lk(mutex);
-        message_queue.emplace(fmt::format("data: {}\n\n", encoded));
+        message_queue.push(Event::from_audio_block(block));
         cv.notify_all();
     }
 
@@ -65,8 +63,9 @@ class StreamManager {
         }
 
         while (!this->message_queue.empty()) {
-            const std::string& message = this->message_queue.front();
-            if (!write_callback(message)) {
+            // const std::string& message = this->message_queue.front();
+            const Event& e = this->message_queue.front();
+            if (!write_callback(e.to_string())) {
                 return true;
             }
             this->message_queue.pop();
@@ -87,7 +86,7 @@ class StreamManager {
   private:
     StreamType type;
     std::string client_id;
-    std::queue<std::string> message_queue;
+    std::queue<Event> message_queue;
     const std::chrono::milliseconds ping_delay{5000};
     std::condition_variable cv;
     std::mutex mutex;
