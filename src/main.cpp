@@ -19,6 +19,7 @@ int main() {
 #endif
 
     httplib::Server server;
+    std::unordered_map<std::string, Sim> sims;
     std::unordered_map<std::string, SimParams> configs;
     std::unordered_map<std::string, std::shared_ptr<EventStream>> event_streams;
 
@@ -64,7 +65,10 @@ int main() {
                 // False means the connection should be cancelled
                 return true;
             },
-            [&event_streams, client_id](bool success) {
+            [client_id, &sims, &configs, &event_streams](bool success) {
+                // Invariant: each client maintains a consistent connection to this endpoint
+                sims.erase(client_id);
+                configs.erase(client_id);
                 // If stream_managers owned the StreamManager objects, this would be UB since
                 // it would free a (likely) locked mutex. Instead, just decrement reference count
                 event_streams.erase(client_id);
@@ -118,32 +122,27 @@ int main() {
             return;
         }
 
-        std::thread([initial_state, client_id, &configs, &event_streams]() {
-            Sim sim;
+        // Stop a previously running simulation
+        if (sims.contains(client_id)) {
+            sims.at(client_id).stop();
+        }
+        SimParams params = configs.at(client_id);
+        sims.insert_or_assign(client_id, Sim(params, initial_state));
+        Sim& sim = sims.at(client_id);
+
+        std::thread([client_id, params, &sim, &event_streams]() {
             bool should_step = true;
-            SimParams params = configs.at(client_id);
-            sim.configure(params, initial_state);
 
             std::shared_ptr<EventStream> event_stream = event_streams.contains(client_id) ? event_streams.at(client_id) : nullptr;
-            sim.set_audio_callback([event_stream, &should_step](auto& audio_block) {
+            sim.set_audio_callback([event_stream](auto& audio_block) {
                 if (event_stream != nullptr) {
                     event_stream->send(Event::from_audio_block(audio_block));
-                }
-
-                double avg_power = 0;
-                for (auto& sample : audio_block) {
-                    avg_power += sample * sample;
-                }
-
-                // Stop when a block is silent (< -60 dB power)
-                if (avg_power < 1e-6) {
-                    should_step = false;
                 }
             });
 
             double dt = 1. / params.physics_sample_rate;
             while (should_step) {
-                sim.step(dt);
+                should_step = sim.step(dt);
             }
             spdlog::debug("finished stepping sim");
         }).detach();

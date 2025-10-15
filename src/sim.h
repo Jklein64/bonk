@@ -28,10 +28,12 @@ struct SimParams {
 
 class Sim {
   public:
-    void configure(const SimParams& params, const SimState& initial_state);
+    Sim(const SimParams& params, const SimState& initial_state);
+
     void set_physics_callback(std::function<void(const std::vector<double>&)> physics_callback);
     void set_audio_callback(std::function<void(const std::vector<double>&)> audio_callback);
-    void step(double dt);
+    bool step(double dt);
+    void stop();
 
   private:
     SimParams params;
@@ -42,4 +44,6 @@ class Sim {
 
     int audio_decimation_factor;
     int steps_until_audio_sample;
+    double audio_power{1.0};
+    bool stopped{false};
 };

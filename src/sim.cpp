@@ -4,7 +4,7 @@
 
 #include "sim.h"
 
-void Sim::configure(const SimParams& params, const SimState& initial_state) {
+Sim::Sim(const SimParams& params, const SimState& initial_state) {
     this->params = params;
     this->state = initial_state;
     this->state.physics_block.reserve(this->params.physics_block_size);
@@ -43,7 +43,11 @@ void Sim::set_audio_callback(std::function<void(const std::vector<double>&)> aud
     spdlog::debug("set audio callback");
 }
 
-void Sim::step(double dt) {
+bool Sim::step(double dt) {
+    if (this->stopped) {
+        return false;
+    }
+
     double c = params.damping;
     double k = params.stiffness;
     double m = params.mass;
@@ -58,9 +62,11 @@ void Sim::step(double dt) {
     }
 
     // Anti-alias and decimate the physics sim to audio rate
-    double x_audio_aa = audio_aa_filter.filter(state.x);
+    double audio_sample = audio_aa_filter.filter(state.x);
+
     if (this->steps_until_audio_sample <= 0) {
-        state.audio_block.push_back(x_audio_aa);
+        state.audio_block.push_back(audio_sample);
+        this->audio_power = 0.999 * this->audio_power + 0.001 * audio_sample * audio_sample;
         if (state.audio_block.size() == params.audio_block_size) {
             this->audio_callback(state.audio_block);
             this->steps_until_audio_sample = this->audio_decimation_factor;
@@ -70,4 +76,10 @@ void Sim::step(double dt) {
 
     // Always decrementing is the correct behavior
     steps_until_audio_sample--;
+
+    return this->audio_power > 1e-6;
+}
+
+void Sim::stop() {
+    this->stopped = true;
 }

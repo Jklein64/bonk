@@ -25,6 +25,12 @@ class BonkProcessor extends AudioWorkletProcessor {
     this.port.addEventListener("message", (messageEvent) => {
       if (messageEvent.data === "stop") {
         this.shouldStop = true;
+      } else if (messageEvent.data === "clear") {
+        if (this.blocks.length > 0) {
+          this.blocks = [this.blocks[0]];
+        } else {
+          this.blocks = [];
+        }
       } else {
         const block = new Float64Array(messageEvent.data);
         this.blocks.push(block);

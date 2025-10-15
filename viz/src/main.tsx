@@ -157,6 +157,7 @@ function App() {
 
     for (const [key, value] of Object.entries(params)) {
       if (!bonkWorkletNode.current) break;
+      bonkWorkletNode.current.port.postMessage("clear");
       const currentTime = audioContext.current.currentTime;
       const param = bonkWorkletNode.current.parameters.get(key);
       if (param) {
@@ -180,12 +181,6 @@ function App() {
           body: JSON.stringify(initialState),
         }).catch((err) => console.error(err));
       });
-
-    // fetch(`/api/configure/${clientId}`, {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify({ params, initialState }),
-    // }).catch((err) => console.error(err));
   };
 
   return (
