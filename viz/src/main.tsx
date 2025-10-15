@@ -3,7 +3,7 @@ import React, { useRef, useState, StrictMode, useMemo, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas, type ThreeElements } from "@react-three/fiber";
 import "./index.css";
-import { useStream, type DataCallback } from "./hooks/useStream";
+import { useStream } from "./hooks/useStream";
 import { UuidContext } from "./context/uuid";
 import useUuid from "./hooks/useUuid";
 
@@ -106,15 +106,10 @@ function App() {
   // TODO adjust the sample rate based on the parameters
   const audioContext = useRef(new AudioContext({ sampleRate: 48000 }));
   const bonkWorkletNode = useRef<AudioWorkletNode>(null);
-  const { subscribe, unsubscribe } = useStream("audio");
+  const { setHandler } = useStream();
   const clientId = useUuid();
 
   useEffect(() => {
-    const callback: DataCallback = (buffer) => {
-      if (!bonkWorkletNode.current) return;
-      bonkWorkletNode.current.port.postMessage(buffer, [buffer]);
-    };
-
     audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
       if (bonkWorkletNode.current) {
         // Disconnect old node before replacing. Have to signal to get process() to return false
@@ -133,13 +128,13 @@ function App() {
         audioContext.current.resume();
       }
     });
-
-    subscribe(callback);
-
-    return () => {
-      unsubscribe(callback);
-    };
   }, []);
+
+  setHandler("audio-block", (data) => {
+    if (!bonkWorkletNode.current) return;
+    const buffer = Uint8Array.from(atob(data), (c) => c.charCodeAt(0)).buffer;
+    bonkWorkletNode.current.port.postMessage(buffer, [buffer]);
+  });
 
   const onSpringRelease = (x: number) => {
     const params = {
@@ -172,11 +167,25 @@ function App() {
       }
     }
 
-    fetch(`/api/configure/${clientId}`, {
-      method: "POST",
+    fetch(`/api/sim/config/${clientId}`, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ params, initialState }),
-    }).catch((err) => console.error(err));
+      body: JSON.stringify(params),
+    })
+      .catch((err) => console.error(err))
+      .then(() => {
+        fetch(`/api/sim/bonk/${clientId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(initialState),
+        }).catch((err) => console.error(err));
+      });
+
+    // fetch(`/api/configure/${clientId}`, {
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({ params, initialState }),
+    // }).catch((err) => console.error(err));
   };
 
   return (

@@ -1,43 +1,32 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef } from "react";
 import useUuid from "../hooks/useUuid";
 
-export type DataCallback = (data: ArrayBuffer) => void;
+type EventType = "audio-block" | "heartbeat";
+type CallbackType = (data: string) => void;
 
-export function useStream(name: string) {
+export function useStream() {
   const clientId = useUuid();
-  const streamUrl = `/api/stream/${name}/${clientId}`;
+  const streamUrl = `/api/sim/stream/${clientId}`;
   const source = useRef<EventSource>(null!);
+  const handlers = useRef<Map<EventType, CallbackType>>(new Map());
 
-  const subscribers: RefObject<Set<DataCallback>> = useRef(new Set());
+  const setHandler = (name: EventType, handler: CallbackType) => {
+    handlers.current.set(name, handler);
+  };
 
   useEffect(() => {
     console.log("creating event source with url " + streamUrl);
     const es = new EventSource(streamUrl);
     source.current = es;
 
-    es.onmessage = (ev) => {
-      const buffer = Uint8Array.from(atob(ev.data), (c) => c.charCodeAt(0)).buffer;
-      for (const callback of subscribers.current) {
-        callback(buffer);
-      }
-    };
+    handlers.current.forEach((handler, name) => {
+      source.current.addEventListener(name, (event) => handler(event.data));
+    });
 
     return () => {
       source.current.close();
     };
   }, []);
 
-  function subscribe(callback: DataCallback) {
-    subscribers.current.add(callback);
-  }
-
-  function unsubscribe(callback: DataCallback) {
-    const unsubscribed = subscribers.current.delete(callback);
-    if (!unsubscribed) console.warn("Attempted to unsubscribe a callback that was never registered.");
-  }
-
-  return {
-    subscribe,
-    unsubscribe,
-  };
+  return { setHandler };
 }

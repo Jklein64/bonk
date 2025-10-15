@@ -21,29 +21,9 @@ enum class StreamType { audio, viz };
 
 class StreamManager {
   public:
-    StreamManager() = delete;
-    ~StreamManager() {
-        auto& stream_managers =
-            (type == StreamType::audio) ? StreamManager::audio_stream_managers : StreamManager::viz_stream_managers;
-        // Invariant: the weak_ptr count is zero for this->client_id
-        stream_managers.erase(this->client_id);
-    }
-
-    static std::shared_ptr<StreamManager> get_or_create(const std::string& client_id, StreamType type) {
-        auto& stream_managers =
-            (type == StreamType::audio) ? StreamManager::audio_stream_managers : StreamManager::viz_stream_managers;
-        if (stream_managers.contains(client_id)) {
-            return stream_managers.find(client_id)->second.lock();
-        } else {
-            std::shared_ptr<StreamManager> ptr(new StreamManager(client_id, type));
-            stream_managers.insert_or_assign(client_id, ptr);
-            return ptr;
-        }
-    }
-
-    void enqueue(const std::vector<double>& block) {
+    void enqueue(Event&& event) {
         std::unique_lock<std::mutex> lk(mutex);
-        message_queue.push(Event::from_audio_block(block));
+        message_queue.push(event);
         cv.notify_all();
     }
 
@@ -51,19 +31,10 @@ class StreamManager {
     bool process(std::function<bool(const std::string&)> write_callback) {
         std::unique_lock<std::mutex> lk(mutex);
         while (this->message_queue.empty()) {
-            // Wait until there's a queue element, catch spurious wakeups, and
-            // also send an SSE "comment" after ping_delay ms to prevent the
-            // client from thinking the connection is closed
-            if (cv.wait_for(lk, this->ping_delay) == std::cv_status::timeout) {
-                std::string message = ":\n\n";
-                if (!write_callback(message)) {
-                    return true;
-                }
-            }
+            cv.wait(lk);
         }
 
         while (!this->message_queue.empty()) {
-            // const std::string& message = this->message_queue.front();
             const Event& e = this->message_queue.front();
             if (!write_callback(e.to_string())) {
                 return true;
@@ -74,20 +45,8 @@ class StreamManager {
         return true;
     }
 
-    inline static std::unordered_map<std::string, std::weak_ptr<StreamManager>> audio_stream_managers;
-    inline static std::unordered_map<std::string, std::weak_ptr<StreamManager>> viz_stream_managers;
-
-  protected:
-    StreamManager(const std::string& client_id, StreamType type) {
-        this->client_id = client_id;
-        this->type = type;
-    }
-
   private:
-    StreamType type;
-    std::string client_id;
     std::queue<Event> message_queue;
-    const std::chrono::milliseconds ping_delay{5000};
     std::condition_variable cv;
     std::mutex mutex;
 };
@@ -98,49 +57,75 @@ int main() {
 #endif
 
     httplib::Server server;
+    // std::unordered_map<std::string, std::weak_ptr<Connection>> connections;
+    // std::unordered_map<std::string, std::weak_ptr<EventStream>> event_streams;
+    std::unordered_map<std::string, SimParams> configs;
+    std::unordered_map<std::string, std::shared_ptr<StreamManager>> stream_managers;
 
-    server.Get("/api/stream/audio/:id", [&](const httplib::Request& req, httplib::Response& res) {
+    std::thread([&]() {
+        while (true) {
+            for (auto& [id, manager] : stream_managers) {
+                spdlog::debug("id {} has refcount {}", id, manager.use_count());
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }).detach();
+
+    server.Get("/api/sim/stream/:id", [&](const httplib::Request& req, httplib::Response& res) {
         std::string client_id = req.path_params.at("id");
-        auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
-        spdlog::debug("configured StreamManager for client id {}", client_id);
+        if (!stream_managers.contains(client_id)) {
+            spdlog::debug("configured new StreamManager for client id {}", client_id);
+            stream_managers.insert({client_id, std::make_shared<StreamManager>()});
+        } else {
+            spdlog::debug("retrieved StreamManager for client id {}", client_id);
+        }
+        auto audio_sm = stream_managers.at(client_id);
+
+        std::thread([audio_sm]() {
+            while (true) {
+                audio_sm->enqueue(Event::from_heartbeat());
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+        }).detach();
 
         res.set_header("Transfer-Encoding", "chunked");
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider("text/event-stream", [audio_sm](size_t, httplib::DataSink& sink) {
-            return audio_sm->process([&sink](const std::string& message) {
-                if (sink.is_writable()) {
-                    sink.write(message.data(), message.size());
-                    return true;
-                } else {
-                    sink.done();
-                    return false;
-                }
+        res.set_chunked_content_provider(
+            "text/event-stream",
+            [audio_sm](size_t, httplib::DataSink& sink) {
+                return audio_sm->process([&sink](const std::string& message) {
+                    if (sink.is_writable()) {
+                        sink.write(message.data(), message.size());
+                        return true;
+                    } else {
+                        sink.done();
+                        return false;
+                    }
+                });
+            },
+            [&stream_managers, client_id](bool success) {
+                // If stream_managers owned the StreamManager objects, this would be UB since
+                // it would free a (likely) locked mutex. Instead, just decrement reference count
+                stream_managers.erase(client_id);
             });
-        });
     });
 
-    server.Post("/api/configure/:id", [&](const httplib::Request& req, httplib::Response& res) {
+    server.Put("/api/sim/config/:id", [&](const httplib::Request& req, httplib::Response& res) {
         SimParams params;
-        SimState initial_state;
-
         try {
             auto json_body = nlohmann::json::parse(req.body);
             params = {
-                .physics_sample_rate = json_body["params"]["physicsSampleRate"],
-                .physics_block_size = json_body["params"]["physicsBlockSize"],
-                .audio_sample_rate = json_body["params"]["audioSampleRate"],
-                .audio_block_size = json_body["params"]["audioBlockSize"],
-                .viz_sample_rate = json_body["params"]["vizSampleRate"],
-                .viz_block_size = json_body["params"]["vizBlockSize"],
-                .mass = json_body["params"]["mass"],
-                .stiffness = json_body["params"]["stiffness"],
-                .damping = json_body["params"]["damping"],
-                .area = json_body["params"]["area"],
-            };
-            initial_state = {
-                .x = json_body["initialState"]["x"],
-                .v = json_body["initialState"]["v"],
+                .physics_sample_rate = json_body["physicsSampleRate"],
+                .physics_block_size = json_body["physicsBlockSize"],
+                .audio_sample_rate = json_body["audioSampleRate"],
+                .audio_block_size = json_body["audioBlockSize"],
+                .viz_sample_rate = json_body["vizSampleRate"],
+                .viz_block_size = json_body["vizBlockSize"],
+                .mass = json_body["mass"],
+                .stiffness = json_body["stiffness"],
+                .damping = json_body["damping"],
+                .area = json_body["area"],
             };
         } catch (nlohmann::json::exception e) {
             res.status = 400;
@@ -149,15 +134,42 @@ int main() {
         }
 
         std::string client_id = req.path_params.at("id");
-        auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
+        configs[client_id] = std::move(params);
+    });
+
+    server.Post("/api/sim/bonk/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        SimState initial_state;
+        try {
+            auto json_body = nlohmann::json::parse(req.body);
+            initial_state = {
+                .x = json_body["x"],
+                .v = json_body["v"],
+            };
+        } catch (nlohmann::json::exception e) {
+            res.status = 400;
+            res.body = e.what();
+            return;
+        }
+
+        std::string client_id = req.path_params.at("id");
+        if (!configs.contains(client_id)) {
+            res.status = 412; // Precondition failed
+            res.body = "Must set a config before starting sim.";
+            return;
+        }
+
+        // auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
+        if (!stream_managers.contains(client_id))
+            stream_managers.insert({client_id, std::make_shared<StreamManager>()});
+        auto audio_sm = stream_managers.at(client_id);
+        auto params = configs.at(client_id);
         // Capturing by reference might use-after-free
         std::thread([=]() {
             Sim sim;
             bool should_step = true;
             sim.configure(params, initial_state);
             sim.set_audio_callback([audio_sm, &should_step](auto& audio_block) {
-                // TODO json is lossy when storing floats as strings!
-                audio_sm->enqueue(audio_block);
+                audio_sm->enqueue(Event::from_audio_block(audio_block));
 
                 double avg_power = 0;
                 for (auto& sample : audio_block) {
@@ -179,6 +191,64 @@ int main() {
 
         // "No data" makes sense here
         res.status = 204;
+
+        // SimState initial_state;
+
+        // try {
+        //     auto json_body = nlohmann::json::parse(req.body);
+        //     params = {
+        //         .physics_sample_rate = json_body["params"]["physicsSampleRate"],
+        //         .physics_block_size = json_body["params"]["physicsBlockSize"],
+        //         .audio_sample_rate = json_body["params"]["audioSampleRate"],
+        //         .audio_block_size = json_body["params"]["audioBlockSize"],
+        //         .viz_sample_rate = json_body["params"]["vizSampleRate"],
+        //         .viz_block_size = json_body["params"]["vizBlockSize"],
+        //         .mass = json_body["params"]["mass"],
+        //         .stiffness = json_body["params"]["stiffness"],
+        //         .damping = json_body["params"]["damping"],
+        //         .area = json_body["params"]["area"],
+        //     };
+        //     initial_state = {
+        //         .x = json_body["initialState"]["x"],
+        //         .v = json_body["initialState"]["v"],
+        //     };
+        // } catch (nlohmann::json::exception e) {
+        //     res.status = 400;
+        //     res.body = e.what();
+        //     return;
+        // }
+
+        // std::string client_id = req.path_params.at("id");
+        // auto audio_sm = StreamManager::get_or_create(client_id, StreamType::audio);
+        // // Capturing by reference might use-after-free
+        // std::thread([=]() {
+        //     Sim sim;
+        //     bool should_step = true;
+        //     sim.configure(params, initial_state);
+        //     sim.set_audio_callback([audio_sm, &should_step](auto& audio_block) {
+        //         // TODO json is lossy when storing floats as strings!
+        //         audio_sm->enqueue(audio_block);
+
+        //         double avg_power = 0;
+        //         for (auto& sample : audio_block) {
+        //             avg_power += sample * sample;
+        //         }
+
+        //         // Stop when a block is silent (< -60 dB power)
+        //         if (avg_power < 1e-6) {
+        //             should_step = false;
+        //         }
+        //     });
+
+        //     double dt = 1. / params.physics_sample_rate;
+        //     while (should_step) {
+        //         sim.step(dt);
+        //     }
+        //     spdlog::debug("finished stepping sim");
+        // }).detach();
+
+        // // "No data" makes sense here
+        // res.status = 204;
     });
 
     server.set_logger([&](const httplib::Request& req, const httplib::Response& res) {
