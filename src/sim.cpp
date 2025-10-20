@@ -67,9 +67,9 @@ bool Sim::step(double dt) {
     if (this->steps_until_audio_sample <= 0) {
         state.audio_block.push_back(audio_sample);
         this->audio_power = 0.999 * this->audio_power + 0.001 * audio_sample * audio_sample;
+        this->steps_until_audio_sample = this->audio_decimation_factor;
         if (state.audio_block.size() == params.audio_block_size) {
             this->audio_callback(state.audio_block);
-            this->steps_until_audio_sample = this->audio_decimation_factor;
             state.audio_block.clear();
         }
     }
