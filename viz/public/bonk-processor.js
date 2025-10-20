@@ -50,6 +50,7 @@ class RingBuffer {
 
   pop() {
     if (this.count === 0) {
+      console.warn("Popping from an empty ring buffer!");
       return null;
     }
 
@@ -92,21 +93,28 @@ class BonkProcessor extends AudioWorkletProcessor {
 
     this.port.start();
     this.port.addEventListener("message", (e) => {
-      switch (e.data) {
+      switch (e.data.event) {
         case "stop":
           this.shouldStop = true;
           return;
-        default:
-          if (e.data.sampleIdx === 0) {
-            // index of the sample at the start of the current block from the processor's perspective
+
+        case "params":
+          const { params } = e.data;
+          console.log("updating params:");
+          console.log(params);
+          this.params = params;
+          return;
+
+        case "buffer":
+          const { start, buffer } = e.data;
+          if (start === 0) {
+            // Audio callback block start sample number
             this.sampleOffset = globalThis.currentFrame;
-            // don't clear until we can guarantee we've got a block to play
+            // Don't clear until we can guarantee we've got a block to play
             this.blocks.clear();
           }
-          const start = this.sampleOffset + e.data.sampleIdx;
-          const block = new Block(start, new Float64Array(e.data.buffer));
+          const block = new Block(start + this.sampleOffset, new Float64Array(buffer));
           this.blocks.push(block);
-
           return;
       }
     });
@@ -117,29 +125,33 @@ class BonkProcessor extends AudioWorkletProcessor {
       return false;
     }
 
-    const audioBlockSize = parameters.audioBlockSize[0];
-    if (audioBlockSize !== 128) {
-      console.error("poop!");
+    if (!this.params) {
+      // don't cancel but don't send audio
+      return true;
     }
 
+    let currentStart = globalThis.currentFrame;
     // Skip blocks that finish after the current callback start sample
-    while (this.blocks.peek()?.end < globalThis.currentFrame) {
+    while (this.blocks.peek()?.end <= currentStart) {
       this.blocks.pop();
     }
 
-    // Play a block if there is one
-    if (this.blocks.count > 0) {
-      for (const output of outputs) {
-        for (const channel of output) {
-          for (let i = 0; i < channel.length; i++) {
-            const block = this.blocks.peek();
-            channel[i] = block.data[i];
-          }
-        }
+    for (let i = 0; i < outputs[0][0].length; i++) {
+      let block = this.blocks.peek();
+      if (!block) break;
+      // Read samples from partway through a block
+      let offset = currentStart - block.start;
+      // ...overflowing to the next one if needed
+      if (offset + i >= block.data.length) {
+        this.blocks.pop();
+        block = this.blocks.peek();
+        if (!block) break;
+        offset = currentStart - block.start;
       }
+      outputs[0][0][i] = block.data[offset + i];
     }
 
-    // still in use
+    // Still in use
     return true;
   }
 }

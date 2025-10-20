@@ -108,6 +108,19 @@ function App() {
   const bonkWorkletNode = useRef<AudioWorkletNode>(null);
   const { setHandler } = useStream();
   const clientId = useUuid();
+  const [params, setParams] = useState({
+    physicsSampleRate: 1000000,
+    physicsBlockSize: 512,
+    audioSampleRate: 48000,
+    audioBlockSize: 1024,
+    vizSampleRate: 30,
+    vizBlockSize: 5,
+    // These sound okay...
+    mass: 0.005,
+    stiffness: 3000,
+    damping: 0.12,
+    area: 1,
+  });
 
   useEffect(() => {
     audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
@@ -132,47 +145,23 @@ function App() {
 
   setHandler("audio-block", (e) => {
     if (!bonkWorkletNode.current) return;
-    const sharedBuffer = new SharedArrayBuffer(128 * 8);
+    const buffer = new SharedArrayBuffer(params.audioBlockSize * 8);
     const decodedData = atob(e.data);
     for (let i = 0; i < decodedData.length; i++) {
-      new DataView(sharedBuffer).setUint8(i, decodedData[i].charCodeAt(0));
+      new DataView(buffer).setUint8(i, decodedData[i].charCodeAt(0));
     }
-    const sampleIdx = parseInt(e.lastEventId);
-    const message = { buffer: sharedBuffer, sampleIdx };
+    const start = parseInt(e.lastEventId);
+    const message = { event: "buffer", buffer, start };
     bonkWorkletNode.current.port.postMessage(message);
   });
 
   const onSpringRelease = (x: number) => {
-    const params = {
-      physicsSampleRate: 1000000,
-      physicsBlockSize: 512,
-      audioSampleRate: 48000,
-      audioBlockSize: 128,
-      vizSampleRate: 30,
-      vizBlockSize: 5,
-      // These sound okay...
-      mass: 0.005,
-      stiffness: 3000,
-      damping: 0.12,
-      area: 1,
-    };
     const initialState = {
       x,
       v: 0,
     };
 
-    for (const [key, value] of Object.entries(params)) {
-      if (!bonkWorkletNode.current) break;
-      // bonkWorkletNode.current.port.postMessage("clear");
-      const currentTime = audioContext.current.currentTime;
-      const param = bonkWorkletNode.current.parameters.get(key);
-      if (param) {
-        console.log(`setting params.${key} = ${value}`);
-        param.setValueAtTime(value, currentTime);
-      } else {
-        console.warn(`failed to set params.${key}`);
-      }
-    }
+    bonkWorkletNode.current?.port.postMessage({ event: "params", params });
 
     fetch(`/api/sim/config/${clientId}`, {
       method: "PUT",
