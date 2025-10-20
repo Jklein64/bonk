@@ -2,26 +2,37 @@
 
 #include <base64.hpp>
 #include <fmt/core.h>
+#include <spdlog/spdlog.h>
 
 Event Event::from_heartbeat() {
-    return Event("heartbeat", "");
+    return {
+        .event_type = "heartbeat",
+    };
 }
 
-Event Event::from_audio_block(std::vector<double> audio_block) {
+Event Event::from_audio_block(std::vector<double> audio_block, size_t sample_idx) {
     // Fine as long as server is known little-endian and client parses that way too
     const char* ptr = reinterpret_cast<const char*>(audio_block.data());
     std::string buffer = base64::encode_into<std::string>(&ptr[0], &ptr[audio_block.size() * sizeof(double)]);
-    return Event("audio-block", buffer);
+    return {
+        .id = fmt::format("{}", sample_idx),
+        .event_type = "audio-block",
+        .data = buffer,
+    };
 }
 
-Event Event::from_viz_block(std::vector<double> viz_block) {
+Event Event::from_viz_block(std::vector<double> viz_block, size_t sample_idx) {
     // TODO
-    return Event("viz-block", "");
+    return {
+        .id = fmt::format("{}", sample_idx),
+        .event_type = "viz-block",
+        .data = "",
+    };
 }
 
 std::string Event::to_string() const {
     // See https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#event_stream_format
-    return fmt::format("event: {}\ndata: {}\n\n", this->event_type, this->data);
+    return fmt::format("id: {}\nevent: {}\ndata: {}\n\n", this->id.value_or(""), this->event_type, this->data);
 }
 
 void EventStream::send(const Event& event) {

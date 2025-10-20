@@ -102,6 +102,7 @@ int main() {
     });
 
     server.Post("/api/sim/bonk/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        // TODO lock the client states
         SimState initial_state;
         try {
             auto json_body = nlohmann::json::parse(req.body);
@@ -132,12 +133,15 @@ int main() {
 
         std::thread([client_id, params, &sim, &event_streams]() {
             bool should_step = true;
+            size_t sample_idx = 0;
 
             std::shared_ptr<EventStream> event_stream = event_streams.contains(client_id) ? event_streams.at(client_id) : nullptr;
-            sim.set_audio_callback([event_stream](auto& audio_block) {
+            sim.set_audio_callback([event_stream, &sample_idx, &params](auto& audio_block) {
                 if (event_stream != nullptr) {
-                    event_stream->send(Event::from_audio_block(audio_block));
+                    event_stream->send(Event::from_audio_block(audio_block, sample_idx));
                 }
+
+                sample_idx += params.audio_block_size;
             });
 
             double dt = 1. / params.physics_sample_rate;
