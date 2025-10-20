@@ -130,10 +130,16 @@ function App() {
     });
   }, []);
 
-  setHandler("audio-block", (data) => {
+  setHandler("audio-block", (e) => {
     if (!bonkWorkletNode.current) return;
-    const buffer = Uint8Array.from(atob(data), (c) => c.charCodeAt(0)).buffer;
-    bonkWorkletNode.current.port.postMessage(buffer, [buffer]);
+    const sharedBuffer = new SharedArrayBuffer(128 * 8);
+    const decodedData = atob(e.data);
+    for (let i = 0; i < decodedData.length; i++) {
+      new DataView(sharedBuffer).setUint8(i, decodedData[i].charCodeAt(0));
+    }
+    const sampleIdx = parseInt(e.lastEventId);
+    const message = { buffer: sharedBuffer, sampleIdx };
+    bonkWorkletNode.current.port.postMessage(message);
   });
 
   const onSpringRelease = (x: number) => {
@@ -157,7 +163,7 @@ function App() {
 
     for (const [key, value] of Object.entries(params)) {
       if (!bonkWorkletNode.current) break;
-      bonkWorkletNode.current.port.postMessage("clear");
+      // bonkWorkletNode.current.port.postMessage("clear");
       const currentTime = audioContext.current.currentTime;
       const param = bonkWorkletNode.current.parameters.get(key);
       if (param) {

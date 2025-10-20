@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import useUuid from "../hooks/useUuid";
 
 type EventType = "audio-block" | "heartbeat";
-type CallbackType = (data: string) => void;
+type CallbackType = (event: any) => void;
 
 export function useStream() {
   const clientId = useUuid();
@@ -20,7 +20,7 @@ export function useStream() {
     source.current = es;
 
     handlers.current.forEach((handler, name) => {
-      source.current.addEventListener(name, (event) => handler(event.data));
+      source.current.addEventListener(name, (event) => handler(event));
     });
 
     return () => {
