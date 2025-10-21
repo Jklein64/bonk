@@ -10,6 +10,7 @@ struct SimState {
 
     std::vector<double> physics_block;
     std::vector<double> audio_block;
+    std::vector<double> viz_block;
 };
 
 struct SimParams {
@@ -46,15 +47,17 @@ class Sim {
 
     void set_physics_callback(std::function<void(const std::vector<double>&)> physics_callback);
     void set_audio_callback(std::function<void(const std::vector<double>&)> audio_callback);
+    void set_viz_callback(std::function<void(const std::vector<double>&)> viz_callback);
     bool step(double dt);
     void stop();
 
   private:
     SimParams params;
     SimState state;
-    Decimator audio_decimator;
+    Decimator audio_decimator, viz_decimator;
     std::function<void(const std::vector<double>&)> physics_callback;
     std::function<void(const std::vector<double>&)> audio_callback;
+    std::function<void(const std::vector<double>&)> viz_callback;
 
     double audio_power{1.0};
     bool stopped{false};

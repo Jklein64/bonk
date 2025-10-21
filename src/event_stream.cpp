@@ -22,11 +22,14 @@ Event Event::from_audio_block(std::vector<double> audio_block, size_t sample_idx
 }
 
 Event Event::from_viz_block(std::vector<double> viz_block, size_t sample_idx) {
-    // TODO
+    // TODO this will be replaced with mesh vertex data
+    // Fine as long as server is known little-endian and client parses that way too
+    const char* ptr = reinterpret_cast<const char*>(viz_block.data());
+    std::string buffer = base64::encode_into<std::string>(&ptr[0], &ptr[viz_block.size() * sizeof(double)]);
     return {
         .id = fmt::format("{}", sample_idx),
         .event_type = "viz-block",
-        .data = "",
+        .data = buffer,
     };
 }
 

@@ -18,9 +18,11 @@ function Wall(props: ThreeElements["mesh"]) {
 
 type TrianglePrismProps = ThreeElements["mesh"] & {
   onSpringRelease?: (x: number) => void;
+  state: { x: number; v: number };
+  setState: ({ x, v }: { x: number; v: number }) => void;
 };
 
-const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props }) => {
+const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, state, setState, ...props }) => {
   const ref = useRef<THREE.Mesh>(null!);
   const [hover, setHover] = useState(false);
   const [clicking, setClicking] = useState(false);
@@ -64,8 +66,7 @@ const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props
 
   function onClickDone() {
     setClicking(false);
-    // Hard-coded rest position of 1
-    const displacement = ref.current.position.x - 1;
+    const displacement = state.x;
     if (Math.abs(displacement) > 1e-8) {
       onSpringRelease?.(displacement);
     }
@@ -74,6 +75,8 @@ const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props
   return (
     <mesh
       ref={ref}
+      // Hard-coded rest position of 1
+      position-x={1 + state.x}
       geometry={geometry}
       onPointerOver={() => setHover(true)}
       onPointerLeave={() => {
@@ -90,7 +93,8 @@ const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props
         if (clicking) {
           // Hard-coded for now
           if (e.point.x >= -0.375) {
-            ref.current.position.setX(e.point.x);
+            // Hard-coded rest position of 1
+            setState({ ...state, x: e.point.x - 1 });
           }
         }
       }}
@@ -102,46 +106,30 @@ const TrianglePrism: React.FC<TrianglePrismProps> = ({ onSpringRelease, ...props
   );
 };
 
-function App() {
-  // TODO adjust the sample rate based on the parameters
-  const audioContext = useRef(new AudioContext({ sampleRate: 48000 }));
-  const bonkWorkletNode = useRef<AudioWorkletNode>(null);
+interface AppProps {
+  audioContext: React.RefObject<AudioContext>;
+  bonkWorkletNode: React.RefObject<AudioWorkletProcessor | null>;
+}
+const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
   const { setHandler } = useStream();
   const clientId = useUuid();
+  const [state, setState] = useState({
+    x: 1,
+    v: 0,
+  });
   const [params, setParams] = useState({
     physicsSampleRate: 1000000,
     physicsBlockSize: 512,
     audioSampleRate: 48000,
     audioBlockSize: 1024,
-    vizSampleRate: 30,
-    vizBlockSize: 5,
+    vizSampleRate: 25,
+    vizBlockSize: 1,
     // These sound okay...
-    mass: 0.005,
-    stiffness: 3000,
-    damping: 0.12,
+    mass: 0.15,
+    stiffness: 2000,
+    damping: 0.1,
     area: 1,
   });
-
-  useEffect(() => {
-    audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
-      if (bonkWorkletNode.current) {
-        // Disconnect old node before replacing. Have to signal to get process() to return false
-        // See https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletProcessor/process#return_value
-        bonkWorkletNode.current.port.postMessage("stop");
-        bonkWorkletNode.current.disconnect();
-        bonkWorkletNode.current.port.close();
-      }
-      bonkWorkletNode.current = new AudioWorkletNode(audioContext.current, "bonk-processor");
-      bonkWorkletNode.current.connect(audioContext.current.destination);
-      bonkWorkletNode.current.port.start();
-    });
-
-    window.addEventListener("click", () => {
-      if (audioContext.current.state === "suspended") {
-        audioContext.current.resume();
-      }
-    });
-  }, []);
 
   setHandler("audio-block", (e) => {
     if (!bonkWorkletNode.current) return;
@@ -153,6 +141,12 @@ function App() {
     const start = parseInt(e.lastEventId);
     const message = { event: "buffer", buffer, start };
     bonkWorkletNode.current.port.postMessage(message);
+  });
+
+  setHandler("viz-block", (e) => {
+    const bytes = Uint8Array.from(atob(e.data), (c) => c.charCodeAt(0));
+    const values = new Float64Array(bytes.buffer);
+    setState({ ...state, x: values[0] });
   });
 
   const onSpringRelease = (x: number) => {
@@ -185,16 +179,51 @@ function App() {
         <spotLight position={[10, 20, 20]} angle={0.15} penumbra={1} decay={0.125} intensity={Math.PI} />
         <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
         <Wall position={[-1, 0, 0]} />
-        <TrianglePrism position={[1, 0, 0]} onSpringRelease={onSpringRelease} />
+        <TrianglePrism position={[1, 0, 0]} state={state} setState={setState} onSpringRelease={onSpringRelease} />
       </Canvas>
     </>
   );
+};
+
+interface AudioContextProviderProps {
+  children: (params: {
+    audioContext: React.RefObject<AudioContext>;
+    bonkWorkletNode: React.RefObject<AudioWorkletNode | null>;
+  }) => React.ReactElement;
 }
+const AudioContextProvider: React.FC<AudioContextProviderProps> = (props) => {
+  // TODO adjust the sample rate based on the parameters
+  const audioContext = useRef(new AudioContext({ sampleRate: 48000 }));
+  const bonkWorkletNode = useRef<AudioWorkletNode>(null);
+
+  useEffect(() => {
+    audioContext.current.audioWorklet.addModule("bonk-processor.js").then(() => {
+      if (bonkWorkletNode.current) {
+        // Disconnect old node before replacing. Have to signal to get process() to return false
+        // See https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletProcessor/process#return_value
+        bonkWorkletNode.current.port.postMessage("stop");
+        bonkWorkletNode.current.disconnect();
+        bonkWorkletNode.current.port.close();
+      }
+      bonkWorkletNode.current = new AudioWorkletNode(audioContext.current, "bonk-processor");
+      bonkWorkletNode.current.connect(audioContext.current.destination);
+      bonkWorkletNode.current.port.start();
+    });
+
+    window.addEventListener("click", () => {
+      if (audioContext.current.state === "suspended") {
+        audioContext.current.resume();
+      }
+    });
+  }, []);
+
+  return props.children({ audioContext, bonkWorkletNode });
+};
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <UuidContext.Provider value={crypto.randomUUID()}>
-      <App />
+      <AudioContextProvider>{(params) => <App {...params} />}</AudioContextProvider>
     </UuidContext.Provider>
   </StrictMode>
 );

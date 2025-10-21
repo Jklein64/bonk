@@ -8,12 +8,15 @@
 Sim::Sim(const SimParams& params, const SimState& initial_state) {
     this->params = params;
     this->state = initial_state;
-    this->state.physics_block.reserve(this->params.physics_block_size);
-    this->state.audio_block.reserve(this->params.audio_block_size);
+    this->state.physics_block.reserve(params.physics_block_size);
+    this->state.audio_block.reserve(params.audio_block_size);
+    this->state.viz_block.reserve(params.viz_block_size);
     this->audio_decimator.setup(params.physics_sample_rate, params.audio_sample_rate);
+    this->viz_decimator.setup(params.physics_sample_rate, params.viz_sample_rate);
     // Uninitialized std::function values are NOT just no-ops, and throw std::bad_function_call
     this->physics_callback = [](auto&) {};
     this->audio_callback = [](auto&) {};
+    this->viz_callback = [](auto&) {};
 
     spdlog::debug("params.physics_sample_rate = {}", params.physics_sample_rate);
     spdlog::debug("params.physics_block_size = {}", params.physics_block_size);
@@ -41,6 +44,12 @@ void Sim::set_audio_callback(std::function<void(const std::vector<double>&)> aud
     spdlog::debug("set audio callback");
 }
 
+void Sim::set_viz_callback(std::function<void(const std::vector<double>&)> viz_callback) {
+    this->viz_callback = viz_callback;
+
+    spdlog::debug("set viz callback");
+}
+
 bool Sim::step(double dt) {
     if (this->stopped) {
         return false;
@@ -59,7 +68,6 @@ bool Sim::step(double dt) {
         state.physics_block.clear();
     }
 
-    // Anti-alias and decimate the physics sim to audio rate
     std::optional<double> audio_sample = this->audio_decimator.filter(state.x);
     if (audio_sample) {
         state.audio_block.push_back(*audio_sample);
@@ -67,6 +75,15 @@ bool Sim::step(double dt) {
         if (state.audio_block.size() == params.audio_block_size) {
             this->audio_callback(state.audio_block);
             state.audio_block.clear();
+        }
+    }
+
+    std::optional<double> viz_sample = this->viz_decimator.filter(state.x);
+    if (viz_sample) {
+        state.viz_block.push_back(*viz_sample);
+        if (state.viz_block.size() == params.viz_block_size) {
+            this->viz_callback(state.viz_block);
+            state.viz_block.clear();
         }
     }
 

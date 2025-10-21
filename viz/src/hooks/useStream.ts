@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import useUuid from "../hooks/useUuid";
 
-type EventType = "audio-block" | "heartbeat";
+type EventType = "audio-block" | "viz-block" | "heartbeat";
 type CallbackType = (event: any) => void;
 
 export function useStream() {
