@@ -26,6 +26,20 @@ struct SimParams {
     double area;      // surface area of object
 };
 
+class Decimator {
+  public:
+    void setup(int source_rate, int target_rate);
+    std::optional<double> filter(double sample);
+
+  private:
+    // Number of samples before filter returns a decimated sample
+    int samples_until_output;
+    // Keep one sample per decimation_factor samples
+    int decimation_factor;
+    // Anti-aliasing filter
+    Iir::Butterworth::LowPass<8> lowpass_filter;
+};
+
 class Sim {
   public:
     Sim(const SimParams& params, const SimState& initial_state);
@@ -38,12 +52,10 @@ class Sim {
   private:
     SimParams params;
     SimState state;
-    Iir::Butterworth::LowPass<8> audio_aa_filter;
+    Decimator audio_decimator;
     std::function<void(const std::vector<double>&)> physics_callback;
     std::function<void(const std::vector<double>&)> audio_callback;
 
-    int audio_decimation_factor;
-    int steps_until_audio_sample;
     double audio_power{1.0};
     bool stopped{false};
 };

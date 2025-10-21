@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <optional>
 #include <spdlog/fmt/bundled/format.h>
 #include <spdlog/spdlog.h>
 
@@ -9,10 +10,7 @@ Sim::Sim(const SimParams& params, const SimState& initial_state) {
     this->state = initial_state;
     this->state.physics_block.reserve(this->params.physics_block_size);
     this->state.audio_block.reserve(this->params.audio_block_size);
-    this->steps_until_audio_sample = 0;
-    // The floor from integer division means this will never go below the audio sample rate
-    this->audio_decimation_factor = params.physics_sample_rate / params.audio_sample_rate;
-    this->audio_aa_filter.setup(params.physics_sample_rate, params.audio_sample_rate / 2.);
+    this->audio_decimator.setup(params.physics_sample_rate, params.audio_sample_rate);
     // Uninitialized std::function values are NOT just no-ops, and throw std::bad_function_call
     this->physics_callback = [](auto&) {};
     this->audio_callback = [](auto&) {};
@@ -62,24 +60,36 @@ bool Sim::step(double dt) {
     }
 
     // Anti-alias and decimate the physics sim to audio rate
-    double audio_sample = audio_aa_filter.filter(state.x);
-
-    if (this->steps_until_audio_sample <= 0) {
-        state.audio_block.push_back(audio_sample);
-        this->audio_power = 0.999 * this->audio_power + 0.001 * audio_sample * audio_sample;
-        this->steps_until_audio_sample = this->audio_decimation_factor;
+    std::optional<double> audio_sample = this->audio_decimator.filter(state.x);
+    if (audio_sample) {
+        state.audio_block.push_back(*audio_sample);
+        this->audio_power = 0.999 * this->audio_power + 0.001 * *audio_sample * *audio_sample;
         if (state.audio_block.size() == params.audio_block_size) {
             this->audio_callback(state.audio_block);
             state.audio_block.clear();
         }
     }
 
-    // Always decrementing is the correct behavior
-    steps_until_audio_sample--;
-
     return this->audio_power > 1e-6;
 }
 
 void Sim::stop() {
     this->stopped = true;
+}
+
+void Decimator::setup(int source_rate, int target_rate) {
+    this->decimation_factor = source_rate / target_rate;
+    this->samples_until_output = this->decimation_factor;
+    this->lowpass_filter.setup(source_rate, target_rate / 2.0f);
+}
+
+std::optional<double> Decimator::filter(double sample) {
+    double filtered_sample = this->lowpass_filter.filter(sample);
+    if (this->samples_until_output == 0) {
+        this->samples_until_output = this->decimation_factor - 1;
+        return filtered_sample;
+    } else {
+        this->samples_until_output--;
+        return std::nullopt;
+    }
 }

@@ -69,21 +69,6 @@ class RingBuffer {
 }
 
 class BonkProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors() {
-    return [
-      { name: "physicsSampleRate" },
-      { name: "physicsBlockSize" },
-      { name: "audioSampleRate" },
-      { name: "audioBlockSize" },
-      { name: "vizSampleRate" },
-      { name: "vizBlockSize" },
-      { name: "mass" },
-      { name: "stiffness" },
-      { name: "damping" },
-      { name: "area" },
-    ];
-  }
-
   constructor(options) {
     super(options);
 
@@ -131,7 +116,7 @@ class BonkProcessor extends AudioWorkletProcessor {
     }
 
     let currentStart = globalThis.currentFrame;
-    // Skip blocks that finish after the current callback start sample
+    // Skip blocks that finish before the current callback start sample
     while (this.blocks.peek()?.end <= currentStart) {
       this.blocks.pop();
     }
