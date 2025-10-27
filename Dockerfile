@@ -18,6 +18,8 @@ RUN /bin/bash <<EOF
         git \
         gnupg \
         gpg \
+        libgmsh-dev \
+        paraview \
         libeigen3-dev \
         libtool \
         libssl-dev \
