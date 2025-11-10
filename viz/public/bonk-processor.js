@@ -98,7 +98,7 @@ class BonkProcessor extends AudioWorkletProcessor {
             // Don't clear until we can guarantee we've got a block to play
             this.blocks.clear();
           }
-          const block = new Block(start + this.sampleOffset, new Float64Array(buffer));
+          const block = new Block(start + this.sampleOffset, new Float32Array(buffer));
           this.blocks.push(block);
           return;
       }

@@ -126,14 +126,15 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
     vizBlockSize: 1,
     // These sound okay...
     mass: 0.15,
-    stiffness: 2000,
+    stiffness: 5000,
+    // stiffness: 2000,
     damping: 0.1,
     area: 1,
   });
 
   setHandler("audio-block", (e) => {
     if (!bonkWorkletNode.current) return;
-    const buffer = new SharedArrayBuffer(params.audioBlockSize * 8);
+    const buffer = new SharedArrayBuffer(params.audioBlockSize * 4);
     const decodedData = atob(e.data);
     for (let i = 0; i < decodedData.length; i++) {
       new DataView(buffer).setUint8(i, decodedData[i].charCodeAt(0));
@@ -145,7 +146,7 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
 
   setHandler("viz-block", (e) => {
     const bytes = Uint8Array.from(atob(e.data), (c) => c.charCodeAt(0));
-    const values = new Float64Array(bytes.buffer);
+    const values = new Float32Array(bytes.buffer);
     setState({ ...state, x: values[0] });
   });
 

@@ -10,10 +10,10 @@ Event Event::from_heartbeat() {
     };
 }
 
-Event Event::from_audio_block(std::vector<double> audio_block, size_t sample_idx) {
+Event Event::from_audio_block(std::vector<float> audio_block, size_t sample_idx) {
     // Fine as long as server is known little-endian and client parses that way too
     const char* ptr = reinterpret_cast<const char*>(audio_block.data());
-    std::string buffer = base64::encode_into<std::string>(&ptr[0], &ptr[audio_block.size() * sizeof(double)]);
+    std::string buffer = base64::encode_into<std::string>(&ptr[0], &ptr[audio_block.size() * sizeof(float)]);
     return {
         .id = fmt::format("{}", sample_idx),
         .event_type = "audio-block",
@@ -21,11 +21,11 @@ Event Event::from_audio_block(std::vector<double> audio_block, size_t sample_idx
     };
 }
 
-Event Event::from_viz_block(std::vector<double> viz_block, size_t sample_idx) {
+Event Event::from_viz_block(std::vector<float> viz_block, size_t sample_idx) {
     // TODO this will be replaced with mesh vertex data
     // Fine as long as server is known little-endian and client parses that way too
     const char* ptr = reinterpret_cast<const char*>(viz_block.data());
-    std::string buffer = base64::encode_into<std::string>(&ptr[0], &ptr[viz_block.size() * sizeof(double)]);
+    std::string buffer = base64::encode_into<std::string>(&ptr[0], &ptr[viz_block.size() * sizeof(float)]);
     return {
         .id = fmt::format("{}", sample_idx),
         .event_type = "viz-block",

@@ -2,15 +2,16 @@
 
 #include <functional>
 #include <iir/Butterworth.h>
+#include <soxrpp.h>
 #include <vector>
 
 struct SimState {
     double x;
     double v;
 
-    std::vector<double> physics_block;
-    std::vector<double> audio_block;
-    std::vector<double> viz_block;
+    std::vector<float> physics_block;
+    std::vector<float> audio_block;
+    std::vector<float> viz_block;
 };
 
 struct SimParams {
@@ -21,16 +22,16 @@ struct SimParams {
     int viz_sample_rate;
     int viz_block_size;
 
-    double mass;      // mass of object on spring
-    double stiffness; // spring constant
-    double damping;   // spring damping
-    double area;      // surface area of object
+    float mass;      // mass of object on spring
+    float stiffness; // spring constant
+    float damping;   // spring damping
+    float area;      // surface area of object
 };
 
 class Decimator {
   public:
     void setup(int source_rate, int target_rate);
-    std::optional<double> filter(double sample);
+    std::optional<float> filter(float sample);
 
   private:
     // Number of samples before filter returns a decimated sample
@@ -45,9 +46,9 @@ class Sim {
   public:
     Sim(const SimParams& params, const SimState& initial_state);
 
-    void set_physics_callback(std::function<void(const std::vector<double>&)> physics_callback);
-    void set_audio_callback(std::function<void(const std::vector<double>&)> audio_callback);
-    void set_viz_callback(std::function<void(const std::vector<double>&)> viz_callback);
+    void set_physics_callback(std::function<void(const std::vector<float>&)> physics_callback);
+    void set_audio_callback(std::function<void(const std::vector<float>&)> audio_callback);
+    void set_viz_callback(std::function<void(const std::vector<float>&)> viz_callback);
     bool step(double dt);
     void stop();
 
@@ -55,9 +56,10 @@ class Sim {
     SimParams params;
     SimState state;
     Decimator audio_decimator, viz_decimator;
-    std::function<void(const std::vector<double>&)> physics_callback;
-    std::function<void(const std::vector<double>&)> audio_callback;
-    std::function<void(const std::vector<double>&)> viz_callback;
+    std::unique_ptr<soxrpp::SoxResampler<float, float>> audio_resampler;
+    std::function<void(const std::vector<float>&)> physics_callback;
+    std::function<void(const std::vector<float>&)> audio_callback;
+    std::function<void(const std::vector<float>&)> viz_callback;
 
     double audio_power{1.0};
     bool stopped{false};

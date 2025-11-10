@@ -11,8 +11,8 @@ struct Event {
     std::string event_type;
     std::string data;
 
-    static Event from_audio_block(std::vector<double> audio_block, size_t sample_idx);
-    static Event from_viz_block(std::vector<double> viz_block, size_t sample_idx);
+    static Event from_audio_block(std::vector<float> audio_block, size_t sample_idx);
+    static Event from_viz_block(std::vector<float> viz_block, size_t sample_idx);
     static Event from_heartbeat();
 
     std::string to_string() const;
