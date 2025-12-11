@@ -178,6 +178,8 @@ int main() {
         spdlog::error("{} {} -> :(", req->method, req->path);
     });
 
+    server.set_mount_point("/", "./viz/dist");
+
     spdlog::info("listening at http://0.0.0.0:3001");
     server.listen("0.0.0.0", 3001);
 }

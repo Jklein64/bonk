@@ -2,10 +2,17 @@ import * as THREE from "three";
 import React, { useRef, useState, StrictMode, useMemo, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas, type ThreeElements } from "@react-three/fiber";
+import { OrbitControls } from "@react-three/drei";
 import "./index.css";
+import "./styles.css";
 import { useStream } from "./hooks/useStream";
 import { UuidContext } from "./context/uuid";
 import useUuid from "./hooks/useUuid";
+import AxisIndicator from "./components/AxisIndicator";
+import TopBar from "./components/TopBar";
+import ControlPanel from "./components/ControlPanel";
+import BottomPanel from "./components/BottomPanel";
+import Model from "./components/Model";
 
 function Wall(props: ThreeElements["mesh"]) {
   return (
@@ -172,16 +179,44 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
       });
   };
 
+  const handleLoadMesh = () => {
+    console.log("Load mesh clicked");
+  };
+
+  const handleResetSim = () => {
+    console.log("Reset sim clicked");
+    setState({ x: 1, v: 0 });
+  };
+
+  const handleApplyChanges = () => {
+    console.log("Apply changes clicked");
+  };
+
   return (
-    <>
-      <Canvas>
-        <ambientLight intensity={Math.PI / 2} />
-        <spotLight position={[10, 20, 20]} angle={0.15} penumbra={1} decay={0.125} intensity={Math.PI} />
-        <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
-        <Wall position={[-1, 0, 0]} />
-        <TrianglePrism position={[1, 0, 0]} state={state} setState={setState} onSpringRelease={onSpringRelease} />
-      </Canvas>
-    </>
+    <div className="app-container">
+      <TopBar
+        onLoadMesh={handleLoadMesh}
+        onResetSim={handleResetSim}
+        onApplyChanges={handleApplyChanges}
+      />
+      <div className="main-content">
+        <ControlPanel params={params} setParams={setParams} />
+        <div className="canvas-container">
+          <Canvas camera={{ position: [3, 3, 3], fov: 50 }}>
+            <ambientLight intensity={Math.PI / 2} />
+            <spotLight position={[10, 20, 20]} angle={0.15} penumbra={1} decay={0.125} intensity={Math.PI} />
+            <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
+            <Wall position={[-1, 0, 0]} />
+            <TrianglePrism position={[1, 0, 0]} state={state} setState={setState} onSpringRelease={onSpringRelease} />
+            {/* Add your Blender model here - uncomment and update the path */}
+            <Model url="/models/HORNET.glb" position={[0, 0, 0]} scale={1} />
+            <OrbitControls enableDamping dampingFactor={0.05} />
+          </Canvas>
+          <AxisIndicator />
+        </div>
+      </div>
+      <BottomPanel />
+    </div>
   );
 };
 
