@@ -56,6 +56,7 @@ class Sim {
     SimParams params;
     SimState state;
     Decimator audio_decimator, viz_decimator;
+    std::vector<float> tmp_audio_buffer;
     std::unique_ptr<soxrpp::SoxResampler<float, float>> audio_resampler;
     std::function<void(const std::vector<float>&)> physics_callback;
     std::function<void(const std::vector<float>&)> audio_callback;

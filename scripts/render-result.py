@@ -19,11 +19,11 @@ if __name__ == "__main__":
         "physicsBlockSize": 512,
         "audioSampleRate": 48000,
         "audioBlockSize": args.audio_block_size,
-        "vizSampleRate": 30,
-        "vizBlockSize": 5,
-        "mass": 0.005,
-        "stiffness": 3000,
-        "damping": 0.12,
+        "vizSampleRate": 25,
+        "vizBlockSize": 1,
+        "mass": 0.15,
+        "stiffness": 5000,
+        "damping": 0.1,
         "area": 1,
     }
 
@@ -36,9 +36,10 @@ if __name__ == "__main__":
     try:
         blocks = []
         for event in stream_client.events():
-            block_bytes = b64decode(event.data)
-            block = np.frombuffer(block_bytes, dtype=np.float64)
-            blocks.append(block)
+            if event.event == "audio-block":
+                block_bytes = b64decode(event.data)
+                block = np.frombuffer(block_bytes, dtype=np.float32)
+                blocks.append(block)
     except urllib3.exceptions.ReadTimeoutError:
         pass
 

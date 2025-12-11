@@ -11,6 +11,7 @@ Sim::Sim(const SimParams& params, const SimState& initial_state) {
     this->state = initial_state;
     this->state.physics_block.reserve(params.physics_block_size);
     this->state.audio_block.reserve(params.audio_block_size);
+    this->tmp_audio_buffer.resize(params.audio_block_size);
     this->state.viz_block.reserve(params.viz_block_size);
     this->audio_decimator.setup(params.physics_sample_rate, params.audio_sample_rate);
     this->viz_decimator.setup(params.physics_sample_rate, params.viz_sample_rate);
@@ -69,21 +70,20 @@ bool Sim::step(double dt) {
     state.physics_block.push_back(state.x);
     if (state.physics_block.size() == params.physics_block_size) {
         this->physics_callback(state.physics_block);
-        state.physics_block.clear();
-
-        // soxrpp::SoxrBuffer<float> ibuf(std::span{state.physics_block});
-        // auto [idone, odone] = audio_resampler.process(const SoxrBuffer<float, InputChannels, InputExtent> &ibuf, SoxrBuffer<float,
-        // OutputChannels, OutputExtent> &obuf)
-    }
-
-    std::optional<float> audio_sample = this->audio_decimator.filter(state.x);
-    if (audio_sample) {
-        state.audio_block.push_back(*audio_sample);
-        this->audio_power = 0.999 * this->audio_power + 0.001 * *audio_sample * *audio_sample;
-        if (state.audio_block.size() == params.audio_block_size) {
-            this->audio_callback(state.audio_block);
-            state.audio_block.clear();
+        soxrpp::SoxrBuffer<float> ibuf(std::span{state.physics_block});
+        soxrpp::SoxrBuffer<float> obuf(std::span{this->tmp_audio_buffer});
+        auto [_, odone] = this->audio_resampler->process(ibuf, obuf);
+        for (int i = 0; i < odone; i++) {
+            float sample = this->tmp_audio_buffer[i];
+            state.audio_block.push_back(sample);
+            this->audio_power = 0.999 * this->audio_power + 0.001 * sample * sample;
+            if (state.audio_block.size() == params.audio_block_size) {
+                this->audio_callback(state.audio_block);
+                state.audio_block.clear();
+            }
         }
+
+        state.physics_block.clear();
     }
 
     std::optional<float> viz_sample = this->viz_decimator.filter(state.x);
