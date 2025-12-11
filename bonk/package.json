@@ -1,0 +1,16 @@
+{
+  "name": "bonk",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "install": "cmake-js compile",
+    "rebuild": "cmake-js compile"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.5.0"
+  },
+  "devDependencies": {
+    "cmake-js": "^7.4.0"
+  }
+}

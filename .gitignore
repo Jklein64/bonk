@@ -1,3 +1,4 @@
 .DS_Store
 .cache/
 build/
+bonk/node_modules/

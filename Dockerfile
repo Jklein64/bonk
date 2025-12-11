@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:25.10
 
 # Never prompts the user for choices on installation/configuration of packages
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,42 +12,18 @@ RUN /bin/bash <<EOF
 
     apt-get update
     apt-get install -y --no-install-recommends \
-        autoconf \
-        build-essential \
-        ca-certificates \
-        git \
-        gnupg \
-        gpg \
-        libgmsh-dev \
-        paraview \
-        libeigen3-dev \
-        libtool \
-        libssl-dev \
-        lsb-release \
-        software-properties-common \
-        unzip \
-        wget
-    # Install CMake. See https://askubuntu.com/a/865294
-    apt-get remove --purge --auto-remove cmake
-    test -f /usr/share/doc/kitware-archive-keyring/copyright || wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
-    apt-get update
-    test -f /usr/share/doc/kitware-archive-keyring/copyright || rm /usr/share/keyrings/kitware-archive-keyring.gpg
-    apt-get install -y --no-install-recommends kitware-archive-keyring
-    apt-get update
-    apt-get install -y --no-install-recommends cmake
-    # Install Clang (mainly for clangd). See https://askubuntu.com/a/1508280
-    wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 18
+        autoconf build-essential ca-certificates cmake wget \
+        clang clangd git gnupg gpg libboost-dev libcgal-dev \
+        libspectra-dev libgmp-dev libmpfr-dev libeigen3-dev \
+        libtool libssl-dev lsb-release software-properties-common
 EOF
 
-# Create a non-root user
-RUN useradd -ms /bin/bash bonk-dev
-USER bonk-dev
+USER ubuntu
 
 # Use bash for the shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Create a script file sourced by both interactive and non-interactive bash shells
-ENV BASH_ENV="/home/bonk-dev/.bash_env"
+ENV BASH_ENV="/home/ubuntu/.bash_env"
 RUN touch "${BASH_ENV}"
 RUN echo '. "${BASH_ENV}"' >> ~/.bashrc
 # Download and install nvm
@@ -57,11 +33,4 @@ RUN nvm install 22.19.0
 # Expose port 3000 for vite dev server
 EXPOSE 3000
 
-# Use heredoc to make multi-line CMD
-RUN tee /tmp/cmd.sh <<EOF
-    cmake -B build
-    cmake --build build
-    ./build/bonk
-EOF
-
-CMD ["/bin/bash", "/tmp/cmd.sh"]
+CMD [ "bash" ]
