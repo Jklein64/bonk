@@ -126,10 +126,13 @@ app.post('/run', (req, res) => {
       return res.status(400).json({error:"Invalid request (count must be a positive number"})
     }
     const response = bonkInstance.runModal(count)
-    if (response != 0) {
-      return res.status(400).json({error: "Failed to run modal steps", message:""+response})
+    if (response = 0) {
+      return res.json({success:true, extinction:false})
+    } else if (response == 6) {
+      return res.json({success:true, extinction:true})
+    } else {
+      return res.status(400).json({error: "Failed to run modal steps", message: "" + response})
     }
-    res.json({success:true})
   }
   catch (error) {
     res.status(500).json({error: "Failed to run modal steps", message:error.message})
