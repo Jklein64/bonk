@@ -1,8 +1,23 @@
 #include "tet.hpp"
 #include <filesystem>
+#include <iterator>
 #include <numbers>
 
 #define SURFACE_MESH_MAX_VERTICES 2500
+
+bool BonkInstance::detectAndFillHoles(Polyhedron poly) {
+  std::vector<boost::graph_traits<Polyhedron>::halfedge_descriptor> border_cycles {};
+  CGAL::Polygon_mesh_processing::extract_boundary_cycles(poly, std::back_inserter(border_cycles));
+  if (!border_cycles.size()) {
+    return true;
+  }
+  for (auto h : border_cycles) {
+    if (!std::get<0>(CGAL::Polygon_mesh_processing::triangulate_refine_and_fair_hole(poly, h))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 BonkInstance::BonkResult BonkInstance::loadMesh(std::string filename) {
   std::filesystem::path p {filename};
@@ -16,20 +31,36 @@ BonkInstance::BonkResult BonkInstance::loadMesh(std::string filename) {
   if (!CGAL::is_triangle_mesh(poly)) {
     CGAL::Polygon_mesh_processing::triangulate_faces(poly);
   }
+  auto noHoles = detectAndFillHoles(poly);
+  if (!noHoles) {
+    return BonkResult::FileOpenFailure;
+  }
+  if (!CGAL::Polygon_mesh_processing::is_outward_oriented(poly)) {
+    CGAL::Polygon_mesh_processing::orient(poly);
+  }
   if (poly.size_of_vertices() > SURFACE_MESH_MAX_VERTICES) {
     StopPredicate stop(SURFACE_MESH_MAX_VERTICES);
     CGAL::Surface_mesh_simplification::edge_collapse(poly, stop, CGAL::parameters::vertex_index_map(get(CGAL::vertex_external_index, poly)).halfedge_index_map(get(CGAL::halfedge_external_index, poly)));
   }
+  if (CGAL::Polygon_mesh_processing::does_self_intersect<CGAL::Parallel_if_available_tag>(poly, CGAL::parameters::vertex_point_map(get(CGAL::vertex_point, poly)))) {
+    return BonkResult::FileOpenFailure;
+  }
   Domain domain(poly);
+  auto bb = CGAL::Polygon_mesh_processing::bbox(poly);
+  auto bb_size = std::sqrt(std::pow(bb.x_span(), 2) + std::pow(bb.y_span(), 2) + std::pow(bb.z_span(), 2));
+  auto max_facet_size = 0.05 * bb_size;
   Criteria criteria(
     CGAL::parameters::facet_angle(30),
-    CGAL::parameters::facet_size(0.2),
-    CGAL::parameters::facet_distance(0.01),
+    CGAL::parameters::facet_size(max_facet_size),
+    CGAL::parameters::facet_distance(max_facet_size * 0.1),
     CGAL::parameters::cell_radius_edge_ratio(2.0),
-    CGAL::parameters::cell_size(0.2)
+    CGAL::parameters::cell_size(max_facet_size)
   );
   complex = CGAL::make_mesh_3<MeshComplex>(domain, criteria);
   complex.remove_isolated_vertices();
+  if (complex.number_of_cells_in_complex() == 0) {
+    return BonkResult::FileOpenFailure;
+  }
   int idx {0};
   for (auto cell = complex.cells_in_complex_begin(); cell != complex.cells_in_complex_end(); ++cell) {
     for (int i = 0; i < 4; i++) {
@@ -81,11 +112,68 @@ BonkInstance::BonkResult BonkInstance::prepareThree() {
   return BonkResult::Success;
 }
 
+double getJustNoticableDifference(double freq) {
+  if (freq < 250) {return 1.0;}
+  if (freq < 500) {return 1.25;}
+  if (freq < 1000) {return 2.5;}
+  if (freq < 2000) {return 4.0;}
+  if (freq < 4000) {return 20.0;}
+  if (freq < 8000) {return 88.0;}
+  return freq / 100.0;
+}
+
+void BonkInstance::calcPhase(double damping, double freqDamping) {
+  phase.resizeLike(freq);  phase.setZero();
+  damp.resizeLike(freq);  damp.setZero();
+  phase_step.resizeLike(freq);  phase_step.setZero();
+  amp.resizeLike(freq);  amp.setZero();
+  for (int i = 0; i < freq.size(); i++) {
+    phase_step[i] = freq[i] * dt;
+    double d = damping + (freq[i] * freqDamping);
+    damp[i] = std::exp(-d * dt);
+  }
+}
+
+void BonkInstance::compressModesAndCalcPhase(double damping, double freqDamping) {
+  std::vector<double> temp_freq {};
+  std::vector<V> temp_modes {};
+  V mode_sum = modes.col(0);
+  double freq_sum = freq[0];
+  int count {1};
+  auto start_f = freq[0];
+  for (int i = 1; i < freq.size(); ++i) {
+    auto f = freq[i];
+    auto f_prev = freq[i-1];
+    auto limit = getJustNoticableDifference(f_prev) * 2;
+    if (std::abs(f - f_prev) < limit && std::abs(f - start_f) < limit * 2) {
+      mode_sum += modes.col(i);
+      freq_sum += f;
+      count++;
+    } else {
+      temp_freq.push_back(freq_sum / count);
+      temp_modes.push_back(mode_sum / std::sqrt(count));
+      mode_sum = modes.col(i);
+      freq_sum = f;
+      count = 1;
+      start_f = freq[i];
+    }
+  }
+  temp_freq.push_back(freq_sum / count);
+  temp_modes.push_back(mode_sum / std::sqrt(count));
+  auto n_modes = temp_freq.size();
+  freq.resize(n_modes);
+  modes.resize(3*vert_count, n_modes);
+  for (int i = 0; i < n_modes; ++i) {
+    freq[i] = temp_freq[i];
+    modes.col(i) = temp_modes[i];
+  }
+  calcPhase(damping, freqDamping);
+}
+
 BonkInstance::BonkResult BonkInstance::initModalContext(double density, double k, double dt, double damping, double freqDamping) {
   if (!isTetMesh) {return BonkResult::BadInvocation;}
-  density = density;
-  dt = dt;
-
+  this->density = density;
+  this->dt = dt;
   auto K = SpMat(3*vert_count, 3*vert_count);
   auto M = SpMat(3*vert_count, 3*vert_count);
   std::vector<T> kTriplets {};
@@ -123,29 +211,19 @@ BonkInstance::BonkResult BonkInstance::initModalContext(double density, double k
   Spectra::SymGEigsSolver<Spectra::SparseSymMatProd<double>, Spectra::SparseCholesky<double>, Spectra::GEigsMode::Cholesky> eigs(opK, opM, desired_modes, ncv);
 
   eigs.init();
-  int nconv = eigs.compute(Spectra::SortRule::SmallestMagn);
+  int nconv = eigs.compute(Spectra::SortRule::LargestMagn);
   if (eigs.info() != Spectra::CompInfo::Successful) {
     return BonkResult::ModalSetupFailure;
   }
 
   freq = eigs.eigenvalues();
   modes = eigs.eigenvectors();
-  phase_step.resizeLike(freq);
-  phase_step.setZero();
-  amp.resizeLike(freq);
-  amp.setZero();
-  phase.resizeLike(freq);
-  phase.setZero();
-  damp.resizeLike(freq);
-  damp.setZero();
-  
   for (int i = 0; i < static_cast<int>(freq.size()); i++) {
     auto f = freq[i] > 0 ? std::sqrt(freq[i]) : 0.0;
     freq[i] = f / (2.0 * std::numbers::pi);
-    phase_step[i] = f * dt;
-    double d = damping + (f * freqDamping);
-    damp[i] = std::exp(-d * dt);
   }
+
+  compressModesAndCalcPhase(damping, freqDamping);
   isBonkable = true;
   return BonkResult::Success;
 }
