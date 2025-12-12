@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:24.04
 
 # Never prompts the user for choices on installation/configuration of packages
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,64 +12,36 @@ RUN /bin/bash <<EOF
 
     apt-get update
     apt-get install -y --no-install-recommends \
-        autoconf \
-        build-essential \
-        ca-certificates \
-        git \
-        gnupg \
-        gpg \
-        libfmt-dev \
-        libtool \
-        libssl-dev \
-        lsb-release \
-        software-properties-common \
-        unzip \
-        wget
-    # Install CMake. See https://askubuntu.com/a/865294
-    apt-get remove --purge --auto-remove cmake
-    test -f /usr/share/doc/kitware-archive-keyring/copyright || wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
-    apt-get update
-    test -f /usr/share/doc/kitware-archive-keyring/copyright || rm /usr/share/keyrings/kitware-archive-keyring.gpg
-    apt-get install -y --no-install-recommends kitware-archive-keyring
-    apt-get update
-    apt-get install -y --no-install-recommends cmake
-    # Install Clang (mainly for clangd). See https://askubuntu.com/a/1508280
-    wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 18
+        autoconf build-essential ca-certificates git gnupg \
+        cmake libcgal-dev libspectra-dev libeigen3-dev clang \
+        clangd gpg libfmt-dev libtool libssl-dev lsb-release \
+        software-properties-common unzip nginx wget
 EOF
 
-
-# Expose port 3000 for NGINX
-EXPOSE 3000
-
-# Another install for actual dependencies
 RUN /bin/bash <<EOF
     add-apt-repository ppa:berndporr/dsp
     apt-get update
     apt-get install -y --no-install-recommends \
         iir1 \
         iir1-dev \
-        libeigen3-dev \
-        nginx \
         libspdlog-dev
 EOF
 
-# Create a non-root user
-RUN useradd -ms /bin/bash bonk-dev
-# Symlink nginx config and assign permissions
+# Expose port 3000 for NGINX
+EXPOSE 3000, 3333
+
 COPY ./nginx.conf /etc/nginx/nginx.conf
-RUN chown -R bonk-dev:bonk-dev /var/lib/nginx /var/log/nginx \
+RUN chown -R ubuntu:ubuntu /var/lib/nginx /var/log/nginx \
     && chmod -R 755 /var/lib/nginx /var/log/nginx \
     # See https://stackoverflow.com/a/64426330
     && touch /run/nginx.pid \
-    && chown -R bonk-dev:bonk-dev /run/nginx.pid
+    && chown -R ubuntu:ubuntu /run/nginx.pid
 
-# nvm install must be user-local
-USER bonk-dev
+USER ubuntu
 # Use bash for the shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Create a script file sourced by both interactive and non-interactive bash shells
-ENV BASH_ENV="/home/bonk-dev/.bash_env"
+ENV BASH_ENV="/home/ubuntu/.bash_env"
 RUN touch "${BASH_ENV}"
 RUN echo 'source "${BASH_ENV}"' >> ~/.bashrc
 # Download and install nvm
@@ -83,4 +55,4 @@ cmake --build build
 ./build/bonk
 EOF
 
-CMD ["/bin/bash", "/tmp/cmd.sh"]
+CMD ["bash"]
