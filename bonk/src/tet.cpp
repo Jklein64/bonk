@@ -1,5 +1,4 @@
 #include "tet.hpp"
-#include <CGAL/Named_function_parameters.h>
 #include <filesystem>
 #include <numbers>
 
@@ -14,15 +13,12 @@ BonkInstance::BonkResult BonkInstance::loadMesh(std::string filename) {
   Mesh m;
   CGAL::IO::read_polygon_mesh(filename, m);
   CGAL::copy_face_graph(m, poly);
-  //std::cout << "Read mesh (" << poly.size_of_vertices() << " vertices)" << std::endl;
   if (!CGAL::is_triangle_mesh(poly)) {
     CGAL::Polygon_mesh_processing::triangulate_faces(poly);
-    //std::cout << "Triangulated mesh (" << poly.size_of_facets() << " facets)" << std::endl;
   }
   if (poly.size_of_vertices() > SURFACE_MESH_MAX_VERTICES) {
     StopPredicate stop(SURFACE_MESH_MAX_VERTICES);
     CGAL::Surface_mesh_simplification::edge_collapse(poly, stop, CGAL::parameters::vertex_index_map(get(CGAL::vertex_external_index, poly)).halfedge_index_map(get(CGAL::halfedge_external_index, poly)));
-    //std::cout << "Decimated mesh (" << poly.size_of_vertices() << " vertices)" << std::endl;
   }
   Domain domain(poly);
   Criteria criteria(
@@ -34,7 +30,6 @@ BonkInstance::BonkResult BonkInstance::loadMesh(std::string filename) {
   );
   complex = CGAL::make_mesh_3<MeshComplex>(domain, criteria);
   complex.remove_isolated_vertices();
-  auto triangulation = complex.triangulation();
   int idx {0};
   for (auto cell = complex.cells_in_complex_begin(); cell != complex.cells_in_complex_end(); ++cell) {
     for (int i = 0; i < 4; i++) {
@@ -55,8 +50,7 @@ BonkInstance::BonkResult BonkInstance::prepareThree() {
   if (!isTetMesh) {return BonkResult::BadInvocation;}
   std::unordered_map<int, int> localToThree {};
   int threeIndex {0};
-  auto triangulation = complex.triangulation();
-  for (auto facet = triangulation.facets_begin(); facet != triangulation.facets_end(); ++facet) {
+  for (auto facet = complex.facets_in_complex_begin(); facet != complex.facets_in_complex_end(); ++facet) {
     auto cell = facet->first;
     auto opposite_vertex_index = facet->second;
     // Gemini
@@ -65,9 +59,9 @@ BonkInstance::BonkResult BonkInstance::prepareThree() {
     auto i2 = (opposite_vertex_index + 3) & 3;
     std::array<int, 3> faceIndices = {i0, i1, i2};
     if ((opposite_vertex_index % 2) == 1) {
-      faceIndices[0] = i1;
-      faceIndices[1] = i2;
+      std::swap(faceIndices[0], faceIndices[1]);
     }
+    // end
     for (int k = 0; k < 3; k++) {
       auto v = cell->vertex(faceIndices[k]);
       int local = handles_to_inds[v];
@@ -80,8 +74,8 @@ BonkInstance::BonkResult BonkInstance::prepareThree() {
         three_to_local[threeIndex] = local;
         threeIndex++;
       }
+      indices.push_back(localToThree[local]);
     }
-    //end
   }
   isThreeReady = true;
   return BonkResult::Success;
@@ -122,38 +116,6 @@ BonkInstance::BonkResult BonkInstance::initModalContext(double density, double k
   }
   K.setFromTriplets(kTriplets.begin(), kTriplets.end());
   M.setFromTriplets(mTriplets.begin(), mTriplets.end());
-  /*std::cout << "A" << std::endl;
-
-  for (int i = 0; i < 3*vert_count; i++) {
-    auto row_all_zero = true;
-    for (int j = 0; j < 3*vert_count; j++) {
-      if (K.coeff(i,j) != 0) {row_all_zero = false; break;}
-    }
-    if (row_all_zero) {std::cout << "Row " << i << " all zero in K";}
-  }
-  for (int i = 0; i < 3*vert_count; i++) {
-    auto row_all_zero = true;
-    for (int j = 0; j < 3*vert_count; j++) {
-      if (M.coeff(i,j) != 0) {row_all_zero = false; break;}
-    }
-    if (row_all_zero) {std::cout << "Row " << i << " all zero in K";}
-  }
-  for (int i = 0; i < 3*vert_count; i++) {
-    auto row_all_zero = true;
-    for (int j = 0; j < 3*vert_count; j++) {
-      if (K.coeff(j,i) != 0) {row_all_zero = false; break;}
-    }
-    if (row_all_zero) {std::cout << "Col " << i << " all zero in K";}
-  }
-  for (int i = 0; i < 3*vert_count; i++) {
-    auto row_all_zero = true;
-    for (int j = 0; j < 3*vert_count; j++) {
-      if (M.coeff(j,i) != 0) {row_all_zero = false; break;}
-    }
-    if (row_all_zero) {std::cout << "Col " << i << " all zero in M";}
-  }
-  */
-
   Spectra::SparseSymMatProd<double> opK(K);
   Spectra::SparseCholesky<double> opM(M);
   auto desired_modes = std::min(MODES, static_cast<int>(vert_count));
@@ -169,9 +131,13 @@ BonkInstance::BonkResult BonkInstance::initModalContext(double density, double k
   freq = eigs.eigenvalues();
   modes = eigs.eigenvectors();
   phase_step.resizeLike(freq);
+  phase_step.setZero();
   amp.resizeLike(freq);
+  amp.setZero();
   phase.resizeLike(freq);
+  phase.setZero();
   damp.resizeLike(freq);
+  damp.setZero();
   
   for (int i = 0; i < static_cast<int>(freq.size()); i++) {
     auto f = freq[i] > 0 ? std::sqrt(freq[i]) : 0.0;
@@ -188,6 +154,7 @@ BonkInstance::BonkResult BonkInstance::initModalContext(double density, double k
 BonkInstance::BonkResult BonkInstance::bonk(std::vector<int> indices, std::vector<double> weights, std::array<double, 3> normalizedForceDirection) {
   if (!isBonkable) {return BonkResult::BadInvocation;}
   forces.resize(3*vert_count);
+  forces.setZero();
   for (size_t i = 0; i < indices.size(); i++) {
     auto trueIndex = three_to_local[indices[i]];
     forces[3*trueIndex] = normalizedForceDirection[0] * weights[i];
@@ -199,9 +166,7 @@ BonkInstance::BonkResult BonkInstance::bonk(std::vector<int> indices, std::vecto
 }
 
 BonkInstance::BonkResult BonkInstance::runModal(int count) {
-  if (modalResults.size() == 0) {
-    modalResults.resize(count);
-  }
+  modalResults.assign(count, 0);
   // Gemini
   for (int i = 0; i < count; i++) {
     for (int j = 0; j < static_cast<int>(freq.size()); j++) {

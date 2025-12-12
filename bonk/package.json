@@ -5,12 +5,15 @@
   "license": "MIT",
   "scripts": {
     "install": "cmake-js compile",
-    "rebuild": "cmake-js compile"
+    "build": "cmake-js compile",
+    "rebuild": "cmake-js rebuild",
+    "clean": "cmake-js clean",
+    "start": "node server.js"
   },
   "dependencies": {
-    "node-addon-api": "^8.5.0"
-  },
-  "devDependencies": {
-    "cmake-js": "^7.4.0"
+    "node-addon-api": "^8.5.0",
+    "cmake-js": "^7.4.0",
+    "express": "5.2.1",
+    "cors": "2.8.5"
   }
 }

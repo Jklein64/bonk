@@ -13,11 +13,13 @@
 #include <CGAL/Polyhedral_mesh_domain_3.h>
 #include <CGAL/make_mesh_3.h>
 #include <CGAL/refine_mesh_3.h>
+#include <CGAL/IO/polygon_mesh_io.h>
 #include <CGAL/Surface_mesh.h>
 #include <CGAL/Polygon_mesh_processing/triangulate_faces.h>
 #include <CGAL/tags.h>
 #include <CGAL/Surface_mesh_simplification/edge_collapse.h>
 #include <CGAL/Surface_mesh_simplification/Policies/Edge_collapse/Edge_count_stop_predicate.h>
+#include <CGAL/Named_function_parameters.h>
 #include <CGAL/number_utils.h>
 #include <eigen3/Eigen/Eigen>
 #include <eigen3/Eigen/Core>
@@ -63,7 +65,6 @@ public:
   std::vector<double> getResults() {
     return modalResults;
   }
-private:
   bool isBonkable {false};
   bool isTetMesh {false};
   bool isThreeReady {false};
