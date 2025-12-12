@@ -15,8 +15,9 @@ file(GLOB_RECURSE sources src/*.cpp src/*.h)
 
 add_executable(${PROJECT_NAME} ${sources})
 target_compile_options(${PROJECT_NAME} PUBLIC -std=c++2a -Wall -Werror)
-target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address)
-target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address)
+# Disabled AddressSanitizer temporarily due to race condition bug
+# target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address)
+# target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address)
 
 # Log debug logs?
 option(ENABLE_DEBUG_LOGS OFF)

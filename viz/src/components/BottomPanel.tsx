@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 
-const BottomPanel: React.FC = () => {
+interface BottomPanelProps {
+  bonkProfile?: number[];
+  audioScope?: number[];
+}
+
+const BottomPanel: React.FC<BottomPanelProps> = ({ bonkProfile = [], audioScope = [] }) => {
   const [reverbPreset, setReverbPreset] = useState<string>("(no reverb)");
   const [dryWet, setDryWet] = useState<number>(50);
 
@@ -12,6 +17,25 @@ const BottomPanel: React.FC = () => {
     "Plate",
     "Spring",
   ];
+
+  // Generate polyline points from data
+  const generatePolyline = (data: number[], width: number, height: number) => {
+    if (data.length === 0) return "";
+    const step = width / Math.max(data.length - 1, 1);
+    const maxVal = Math.max(...data, 0.001);
+    const minVal = Math.min(...data, 0);
+    const range = maxVal - minVal;
+
+    return data.map((val, i) => {
+      const x = i * step;
+      const y = height - ((val - minVal) / range) * height * 0.8 - height * 0.1;
+      return `${x},${y}`;
+    }).join(" ");
+  };
+
+  // Calculate stats for bonk profile
+  const duration = bonkProfile.length > 0 ? bonkProfile.length / 48000 : 0;
+  const maximum = bonkProfile.length > 0 ? Math.max(...bonkProfile.map(Math.abs)) : 0;
 
   return (
     <div className="bottom-panel">
@@ -48,18 +72,60 @@ const BottomPanel: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <div className="bottom-section bonk-profile-section">
+        <h3 className="bottom-section-title">Bonk Profile</h3>
+        <div className="profile-stats">
+          <div className="stat">
+            <div className="stat-label">duration (s)</div>
+            <div className="stat-value">{duration.toFixed(8)}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">maximum (n)</div>
+            <div className="stat-value">{maximum.toFixed(2)}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">smoothness (?)</div>
+            <div className="stat-value">20</div>
+          </div>
+        </div>
+        <div className="scope-container">
+          <svg width="100%" height="100" style={{ background: "transparent" }}>
+            {bonkProfile.length > 0 ? (
+              <polyline
+                points={generatePolyline(bonkProfile, 600, 100)}
+                fill="none"
+                stroke="#ff4a7e"
+                strokeWidth="1.5"
+              />
+            ) : (
+              <text x="50%" y="50%" textAnchor="middle" fill="#666" fontSize="12">
+                No data - drag and release the spring to generate profile
+              </text>
+            )}
+          </svg>
+        </div>
+      </div>
+
       <div className="bottom-section scope-section">
         <h3 className="bottom-section-title">Scope</h3>
         <div className="scope-container">
-          {/* Placeholder for audio scope/waveform visualization */}
           <svg width="100%" height="100" style={{ background: "transparent" }}>
-            <polyline
-              points="0,50 50,30 100,60 150,25 200,70 250,35 300,55 350,40 400,50 450,45 500,50 550,55 600,50"
-              fill="none"
-              stroke="#4a9eff"
-              strokeWidth="1.5"
-            />
-            <line x1="0" y1="50" x2="600" y2="50" stroke="#333" strokeWidth="1" strokeDasharray="5,5" />
+            {audioScope.length > 0 ? (
+              <>
+                <polyline
+                  points={generatePolyline(audioScope, 600, 100)}
+                  fill="none"
+                  stroke="#4a9eff"
+                  strokeWidth="1.5"
+                />
+                <line x1="0" y1="50" x2="600" y2="50" stroke="#333" strokeWidth="1" strokeDasharray="5,5" />
+              </>
+            ) : (
+              <text x="50%" y="50%" textAnchor="middle" fill="#666" fontSize="12">
+                No audio data
+              </text>
+            )}
           </svg>
         </div>
       </div>

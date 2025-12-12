@@ -138,6 +138,8 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
     damping: 0.1,
     area: 1,
   });
+  const [bonkProfile, setBonkProfile] = useState<number[]>([]);
+  const [audioScope, setAudioScope] = useState<number[]>([]);
 
   setHandler("audio-block", (e) => {
     if (!bonkWorkletNode.current) return;
@@ -149,6 +151,30 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
     const start = parseInt(e.lastEventId);
     const message = { event: "buffer", buffer, start };
     bonkWorkletNode.current.port.postMessage(message);
+
+    const audioData = new Float32Array(buffer);
+
+    const profileDownsample = 80;
+    const downsampledProfile: number[] = [];
+    for (let i = 0; i < audioData.length; i += profileDownsample) {
+      downsampledProfile.push(audioData[i]);
+    }
+
+    if (start === 0) {
+      setBonkProfile(downsampledProfile);
+    } else {
+      setBonkProfile(prev => {
+        const combined = prev.concat(downsampledProfile);
+        return combined.length > 10000 ? combined.slice(-10000) : combined;
+      });
+    }
+
+    const scopeDownsample = Math.max(1, Math.floor(audioData.length / 600));
+    const scopeData = [];
+    for (let i = 0; i < audioData.length; i += scopeDownsample) {
+      scopeData.push(audioData[i]);
+    }
+    setAudioScope(scopeData);
   });
 
   setHandler("viz-block", (e) => {
@@ -190,7 +216,17 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
   };
 
   const handleApplyChanges = () => {
-    console.log("Apply changes clicked");
+    console.log("Apply changes clicked", params);
+    fetch(`/api/sim/config/${clientId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    })
+      .then(() => {
+        console.log("Parameters updated successfully");
+        bonkWorkletNode.current?.port.postMessage({ event: "params", params });
+      })
+      .catch((err) => console.error("Failed to update parameters:", err));
   };
 
   return (
@@ -209,14 +245,22 @@ const App: React.FC<AppProps> = ({ bonkWorkletNode }) => {
             <pointLight position={[-10, -10, -10]} decay={0.25} intensity={Math.PI} />
             <Wall position={[-1, 0, 0]} />
             <TrianglePrism position={[1, 0, 0]} state={state} setState={setState} onSpringRelease={onSpringRelease} />
-            {/* Add your Blender model here - uncomment and update the path */}
+            {/* Add blender model here */}
             <Model url="/models/HORNET.glb" position={[0, 0, 0]} scale={1} />
-            <OrbitControls enableDamping dampingFactor={0.05} />
+            <OrbitControls
+              enableDamping
+              dampingFactor={0.05}
+              mouseButtons={{
+                LEFT: undefined,
+                MIDDLE: undefined,
+                RIGHT: 2,
+              }}
+            />
           </Canvas>
           <AxisIndicator />
         </div>
       </div>
-      <BottomPanel />
+      <BottomPanel bonkProfile={bonkProfile} audioScope={audioScope} />
     </div>
   );
 };
