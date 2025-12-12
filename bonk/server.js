@@ -60,7 +60,7 @@ app.get('/indices', (req, res) => {
 
 app.get('/vertices', (req, res) => {
   try {
-    const vertices = bonkInstance.getIndices()
+    const vertices = bonkInstance.getVertices()
     res.json({success:true, data:vertices})
   } catch(error) {
     console.error(error)
